@@ -1,0 +1,3 @@
+rag_summarize_prompt_path: prompts/rag_summarize.txt
+ingestion_emotion_prompt_path: prompts/ingestion_emotion.txt
+ingestion_vision_prompt_path: prompts/ingestion_vision.txt
