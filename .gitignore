@@ -1,0 +1,4 @@
+**/__pycache__/
+work_B/test/
+*.db
+**/logs/
