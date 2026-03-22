@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鹅鸭杀助手</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+  .header { background: #1e293b; padding: 12px 24px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .dot { width: 10px; height: 10px; border-radius: 50%; background: #475569; flex-shrink: 0; }
+  .header .dot.running { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+  .header-right { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: #94a3b8; }
+  .header-right span { color: #e2e8f0; font-weight: 500; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+
+  .controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  button:hover { transform: translateY(-1px); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-success { background: #22c55e; color: white; }
+  .btn-danger { background: #ef4444; color: white; }
+  .btn-outline { background: transparent; color: #94a3b8; border: 1px solid #334155; }
+  .btn-outline:hover:not(:disabled) { background: #1e293b; color: #e2e8f0; }
+  .btn-purple { background: linear-gradient(135deg, #8b5cf6, #6d28d9); color: white; }
+  .btn-purple:hover:not(:disabled) { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+  .btn-purple:disabled { background: #4c1d95; }
+  .btn-purple.loading { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+  .main-grid { display: grid; grid-template-columns: 220px 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .panel { background: #1e293b; border-radius: 10px; overflow: hidden; }
+  .panel-header { padding: 10px 14px; background: #334155; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .panel-header .badge { background: #3b82f6; color: white; font-size: 10px; padding: 2px 7px; border-radius: 8px; }
+  .panel-body { max-height: 420px; overflow-y: auto; }
+
+  /* --- Roster sidebar --- */
+  .roster-item { padding: 8px 12px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; transition: background 0.1s; }
+  .roster-item:hover { background: #334155; }
+  .roster-item input[type=checkbox] { accent-color: #8b5cf6; width: 15px; height: 15px; cursor: pointer; }
+  .roster-num { background: #3b82f6; color: white; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; min-width: 26px; text-align: center; }
+  .roster-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roster-actions { padding: 8px 12px; display: flex; gap: 6px; border-top: 1px solid #334155; }
+  .roster-empty { padding: 24px 12px; text-align: center; color: #475569; font-size: 12px; line-height: 1.6; }
+
+  /* --- Speech records --- */
+  .filter-bar { display: flex; gap: 4px; padding: 8px 10px; flex-wrap: wrap; border-bottom: 1px solid #334155; }
+  .filter-btn { padding: 4px 10px; border-radius: 4px; font-size: 11px; border: 1px solid #475569; background: transparent; color: #94a3b8; cursor: pointer; }
+  .filter-btn:hover { background: #334155; color: #e2e8f0; }
+  .filter-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+  .record { padding: 10px 14px; border-bottom: 1px solid #1e293b; }
+  .record:last-child { border-bottom: none; }
+  .record-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .speaker-badge { background: #3b82f6; color: white; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 3px; }
+  .record-time { font-size: 10px; color: #64748b; }
+  .record-text { font-size: 13px; line-height: 1.6; }
+  .empty { padding: 30px; text-align: center; color: #475569; font-size: 13px; }
+
+  /* --- Inference section --- */
+  .inference-row { display: flex; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .inference-row { flex-direction: column; } }
+  .inference-config { flex: 1; }
+  .inference-config .panel-body { padding: 14px; }
+  .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .config-field { display: flex; flex-direction: column; gap: 3px; }
+  .config-field label { font-size: 11px; color: #94a3b8; }
+  .config-field input, .config-field select { padding: 7px 10px; border: 1px solid #334155; border-radius: 5px; background: #0f172a; color: #e2e8f0; font-size: 12px; outline: none; }
+  .config-field input:focus, .config-field select:focus { border-color: #3b82f6; }
+  .send-mode { margin-top: 10px; display: flex; gap: 16px; align-items: center; font-size: 12px; color: #94a3b8; }
+  .send-mode label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .send-mode input[type=radio] { accent-color: #8b5cf6; }
+  .inference-action { display: flex; flex-direction: column; justify-content: center; }
+
+  /* --- Decision result --- */
+  .decision-block { padding: 14px; }
+  .decision-block h3 { font-size: 13px; color: #a78bfa; margin-bottom: 6px; font-weight: 600; }
+  .decision-block .content { font-size: 13px; line-height: 1.8; white-space: pre-wrap; }
+  .decision-divider { border: none; border-top: 1px solid #334155; margin: 8px 14px; }
+  .decision-empty { padding: 30px; text-align: center; color: #475569; font-size: 13px; }
+  .decision-error { padding: 14px; color: #f87171; font-size: 13px; }
+
+  .debug-toggle { cursor: pointer; user-select: none; color: #94a3b8; font-size: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 6px; }
+  .debug-toggle:hover { color: #e2e8f0; }
+  .debug-toggle::before { content: '▶'; font-size: 9px; transition: transform 0.15s; display: inline-block; }
+  .debug-toggle.open::before { transform: rotate(90deg); }
+  .debug-body { display: none; padding: 0 14px 14px; }
+  .debug-body.open { display: block; }
+  .debug-prompt { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 12px; font-family: 'Cascadia Code','Consolas',monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: #cbd5e1; max-height: 500px; overflow-y: auto; }
+
+  /* --- Log (collapsible) --- */
+  .log-toggle { cursor: pointer; user-select: none; }
+  .log-toggle::after { content: ' ▼'; font-size: 10px; }
+  .log-toggle.collapsed::after { content: ' ▶'; }
+  .log-body { max-height: 200px; overflow-y: auto; }
+  .log-body.collapsed { display: none; }
+  .log-line { padding: 2px 14px; font-family: 'Cascadia Code','Consolas',monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+  .log-line.info { color: #94a3b8; }
+  .log-line.speaker { color: #22c55e; }
+  .log-line.asr { color: #fbbf24; }
+  .log-line.error { color: #f87171; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="dot" id="statusDot"></div>
+  <h1>鹅鸭杀助手</h1>
+  <div class="header-right">
+    <div>状态: <span id="statusText">未连接</span></div>
+    <div>窗口: <span id="windowTitle">未选择</span></div>
+    <div>当前发言: <span id="currentSpeaker">--</span></div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="controls">
+    <button class="btn-primary" id="btnSelect" onclick="selectWindow()">选择窗口</button>
+    <button class="btn-success" id="btnStart" onclick="startMonitor()">开始监控</button>
+    <button class="btn-danger" id="btnStop" onclick="stopMonitor()" disabled>停止监控</button>
+    <button class="btn-outline" onclick="takeScreenshot()">截图预览</button>
+    <button class="btn-outline" onclick="scanRoster()">识别名单</button>
+    <button class="btn-outline btn-sm" onclick="clearLog()">清空日志</button>
+  </div>
+
+  <div class="main-grid">
+    <!-- Left: roster -->
+    <div class="panel">
+      <div class="panel-header">
+        玩家名单
+        <span class="badge" id="rosterCount">0</span>
+      </div>
+      <div class="panel-body" id="rosterList">
+        <div class="roster-empty">点击「识别名单」从游戏截图提取<br>或手动在截图中识别玩家信息</div>
+      </div>
+      <div class="roster-actions">
+        <button class="btn-outline btn-sm" onclick="rosterSelectAll()">全选</button>
+        <button class="btn-outline btn-sm" onclick="rosterSelectNone()">全不选</button>
+        <button class="btn-outline btn-sm" onclick="rosterInvert()">反选</button>
+      </div>
+    </div>
+
+    <!-- Right: speech records -->
+    <div class="panel">
+      <div class="panel-header">
+        发言记录
+        <span class="badge" id="recordCount">0</span>
+      </div>
+      <div class="filter-bar" id="filterBar">
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
+      </div>
+      <div class="panel-body" id="recordList">
+        <div class="empty">等待监控启动...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inference -->
+  <div class="inference-row">
+    <div class="panel inference-config">
+      <div class="panel-header">推理配置</div>
+      <div class="panel-body">
+        <div class="config-grid">
+          <div class="config-field">
+            <label>座位号</label>
+            <input type="number" id="cfgSeatNum" value="3" min="1" max="16">
+          </div>
+          <div class="config-field">
+            <label>玩家 ID</label>
+            <input type="text" id="cfgPlayerId" value="哈吉贵">
+          </div>
+          <div class="config-field">
+            <label>角色名</label>
+            <input type="text" id="cfgRoleName" value="通灵">
+          </div>
+          <div class="config-field">
+            <label>阵营</label>
+            <select id="cfgAlignment">
+              <option value="goose" selected>鹅 (Goose)</option>
+              <option value="duck">鸭 (Duck)</option>
+              <option value="neutral">中立</option>
+              <option value="unknown">未知</option>
+            </select>
+          </div>
+        </div>
+        <div class="send-mode">
+          <span>发送范围:</span>
+          <label><input type="radio" name="sendMode" value="all" checked> 所有发言</label>
+          <label><input type="radio" name="sendMode" value="selected"> 仅左侧勾选的玩家</label>
+        </div>
+      </div>
+    </div>
+    <div class="inference-action">
+      <button class="btn-purple" id="btnInference" onclick="runInference()" style="padding:16px 32px;font-size:16px;">开始推理</button>
+    </div>
+  </div>
+
+  <!-- Decision result -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      决策结果
+      <span class="badge" id="decisionTime">--</span>
+    </div>
+    <div class="panel-body" id="decisionArea" style="max-height:none;">
+      <div class="decision-empty">点击「开始推理」获取大模型分析与建议</div>
+    </div>
+  </div>
+
+  <!-- Log (collapsible) -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="log-toggle" id="logToggle" onclick="toggleLog()">实时日志</span>
+      <span class="badge" id="logCount">0</span>
+    </div>
+    <div class="log-body" id="logList">
+    </div>
+  </div>
+
+  <!-- Screenshot (hidden by default, shown on demand) -->
+  <div class="panel" style="margin-top:16px;display:none;" id="screenshotPanel">
+    <div class="panel-header">截图预览 <span class="badge" id="screenshotTime">--</span></div>
+    <div class="panel-body" id="screenshotArea" style="padding:12px;max-height:none;"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let ws = null;
+let records = [];
+let logs = [];
+let currentSessionId = null;
+let roster = [];
+let activeFilter = 'all';
+
+// ── Utilities ──
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function addLog(text, type='info') {
+  logs.push({text, type, time: new Date().toLocaleTimeString()});
+  if (logs.length > 200) logs.shift();
+  renderLogs();
+}
+
+// ── Roster ──
+function renderRoster() {
+  const el = document.getElementById('rosterList');
+  document.getElementById('rosterCount').textContent = roster.length;
+  if (!roster.length) {
+    el.innerHTML = '<div class="roster-empty">点击「识别名单」从游戏截图提取</div>';
+    return;
+  }
+  el.innerHTML = roster.map((r,i) => `
+    <label class="roster-item">
+      <input type="checkbox" data-num="${r.number}" checked onchange="updateFilterBar()">
+      <span class="roster-num">${r.number}</span>
+      <span class="roster-name">${escHtml(r.name || '—')}</span>
+    </label>
+  `).join('');
+  updateFilterBar();
+}
+function rosterSelectAll() { document.querySelectorAll('#rosterList input[type=checkbox]').forEach(cb => cb.checked = true); }
+function rosterSelectNone() { document.querySelectorAll('#rosterList input[type=checkbox]').forEach(cb => cb.checked = false); }
+function rosterInvert() { document.querySelectorAll('#rosterList input[type=checkbox]').forEach(cb => cb.checked = !cb.checked); }
+function getSelectedSpeakers() {
+  return [...document.querySelectorAll('#rosterList input[type=checkbox]:checked')].map(cb => cb.dataset.num);
+}
+
+async function scanRoster() {
+  addLog('正在识别玩家名单...', 'info');
+  try {
+    const res = await fetch(`${API}/api/scan-roster`, {method:'POST'});
+    const data = await res.json();
+    if (data.roster && data.roster.length) {
+      roster = data.roster;
+      renderRoster();
+      addLog(`识别到 ${roster.length} 名玩家`, 'info');
+    } else {
+      addLog('未识别到玩家，请确保游戏处于角色/投票界面', 'error');
+    }
+  } catch(e) { addLog(`识别失败: ${e.message}`, 'error'); }
+}
+
+// ── Filter bar ──
+function updateFilterBar() {
+  const bar = document.getElementById('filterBar');
+  const speakers = new Set(records.map(r => r.speaker).filter(Boolean));
+  let html = '<button class="filter-btn' + (activeFilter==='all'?' active':'') + '" data-filter="all" onclick="setFilter(\'all\')">全部</button>';
+  const nums = [...speakers].sort();
+  for (const num of nums) {
+    const name = roster.find(r => r.number === num)?.name || '';
+    const label = name ? `${num} ${name}` : `${num}号`;
+    html += `<button class="filter-btn${activeFilter===num?' active':''}" data-filter="${num}" onclick="setFilter('${num}')">${escHtml(label)}</button>`;
+  }
+  bar.innerHTML = html;
+}
+function setFilter(f) {
+  activeFilter = f;
+  updateFilterBar();
+  renderRecords();
+}
+
+// ── Records ──
+function renderRecords() {
+  const el = document.getElementById('recordList');
+  const filtered = activeFilter === 'all' ? records : records.filter(r => r.speaker === activeFilter);
+  document.getElementById('recordCount').textContent = filtered.length;
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty">' + (records.length ? '该玩家暂无发言' : '等待监控启动...') + '</div>';
+    return;
+  }
+  el.innerHTML = filtered.slice().reverse().map(r => {
+    const name = roster.find(x => x.number === r.speaker)?.name;
+    const label = name ? `${r.speaker} ${name}` : `${r.speaker || '??'}号`;
+    return `<div class="record">
+      <div class="record-head">
+        <span class="speaker-badge">${escHtml(label)}</span>
+        <span class="record-time">${r.timestamp || ''}</span>
+      </div>
+      <div class="record-text">${escHtml(r.text)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Logs ──
+function renderLogs() {
+  const el = document.getElementById('logList');
+  document.getElementById('logCount').textContent = logs.length;
+  el.innerHTML = logs.map(l => `<div class="log-line ${l.type}">[${l.time}] ${escHtml(l.text)}</div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+function toggleLog() {
+  document.getElementById('logToggle').classList.toggle('collapsed');
+  document.getElementById('logList').classList.toggle('collapsed');
+}
+
+// ── Status ──
+function updateStatus(data) {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  if (data.is_running) {
+    dot.className = 'dot running'; text.textContent = '运行中';
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    document.getElementById('btnSelect').disabled = true;
+  } else {
+    dot.className = 'dot'; text.textContent = '已就绪';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    document.getElementById('btnSelect').disabled = false;
+  }
+  document.getElementById('windowTitle').textContent = data.window_title || '未选择';
+  document.getElementById('currentSpeaker').textContent = data.current_speaker ? `${data.current_speaker}号` : '--';
+}
+
+// ── WebSocket ──
+function connectWS() {
+  if (ws && ws.readyState <= 1) return;
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => addLog('WebSocket 已连接', 'info');
+  ws.onclose = () => { addLog('WebSocket 断开，3秒后重连...', 'error'); setTimeout(connectWS, 3000); };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    switch(msg.type) {
+      case 'status': updateStatus(msg.data); break;
+      case 'speaker_change':
+        document.getElementById('currentSpeaker').textContent = `${msg.data.new_speaker}号`;
+        addLog(`发言人切换: ${msg.data.old_speaker||'无'} → ${msg.data.new_speaker}`, 'speaker');
+        break;
+      case 'ingestion': {
+        const d = msg.data;
+        const spk = d.metadata?.speaker_id || '??';
+        records.push({ speaker: spk, text: d.content || '', timestamp: new Date().toLocaleTimeString() });
+        updateFilterBar();
+        renderRecords();
+        addLog(`[${spk}号] ${d.content||''}`, 'asr');
+        break;
+      }
+      case 'roster':
+        roster = msg.data;
+        renderRoster();
+        addLog(`收到玩家名单 (${roster.length}人)`, 'info');
+        break;
+      case 'decision':
+        renderDecision(msg.data);
+        addLog('收到决策推送', 'info');
+        break;
+      case 'status_change':
+        addLog(`状态变更: ${msg.data.status}`, 'info');
+        fetchStatus();
+        break;
+    }
+  };
+}
+
+// ── API calls ──
+async function fetchStatus() {
+  try { const res = await fetch(`${API}/api/status`); updateStatus(await res.json()); }
+  catch(e) { addLog(`获取状态失败: ${e.message}`, 'error'); }
+}
+async function selectWindow() {
+  addLog('正在弹出窗口选择器...', 'info');
+  document.getElementById('btnSelect').disabled = true;
+  try {
+    const res = await fetch(`${API}/api/select-window`, {method:'POST'});
+    const data = await res.json();
+    if (data.status === 'success') {
+      addLog(`已选择窗口: ${data.window.title}`, 'info');
+      document.getElementById('windowTitle').textContent = data.window.title;
+    } else { addLog('窗口选择已取消', 'info'); }
+  } catch(e) { addLog(`选择窗口失败: ${e.message}`, 'error'); }
+  document.getElementById('btnSelect').disabled = false;
+}
+async function startMonitor() {
+  addLog('正在启动监控...', 'info');
+  document.getElementById('btnStart').disabled = true;
+  try {
+    currentSessionId = `session_${Date.now()}`;
+    const res = await fetch(`${API}/api/start`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: currentSessionId})});
+    const data = await res.json();
+    if (data.status === 'success') { addLog(`监控已启动 (session: ${currentSessionId})`, 'info'); }
+    else { addLog(`启动失败: ${data.message||JSON.stringify(data)}`, 'error'); document.getElementById('btnStart').disabled = false; }
+    fetchStatus();
+  } catch(e) { addLog(`启动失败: ${e.message}`, 'error'); document.getElementById('btnStart').disabled = false; }
+}
+async function stopMonitor() {
+  try { await fetch(`${API}/api/stop`, {method:'POST'}); addLog('监控已停止', 'info'); fetchStatus(); }
+  catch(e) { addLog(`停止失败: ${e.message}`, 'error'); }
+}
+function clearLog() { logs = []; renderLogs(); }
+
+// ── Screenshot ──
+async function takeScreenshot() {
+  const panel = document.getElementById('screenshotPanel');
+  const area = document.getElementById('screenshotArea');
+  panel.style.display = 'block';
+  area.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;">正在截图...</div>';
+  try {
+    const res = await fetch(`${API}/api/screenshot`);
+    if (!res.ok) { area.innerHTML = '<div style="padding:20px;color:#f87171;">截图失败</div>'; return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    area.innerHTML = `<img src="${url}" style="max-width:100%;border-radius:6px;border:1px solid #334155;">`;
+    document.getElementById('screenshotTime').textContent = new Date().toLocaleTimeString();
+    addLog('截图成功', 'info');
+  } catch(e) { area.innerHTML = `<div style="padding:20px;color:#f87171;">截图失败: ${e.message}</div>`; }
+}
+
+// ── Inference ──
+async function runInference() {
+  const btn = document.getElementById('btnInference');
+  const area = document.getElementById('decisionArea');
+  if (!currentSessionId) {
+    area.innerHTML = '<div class="decision-error">请先「开始监控」并等待收集发言后再推理</div>';
+    addLog('推理失败: 尚未启动监控', 'error');
+    return;
+  }
+  btn.disabled = true; btn.classList.add('loading'); btn.textContent = '推理中...';
+  area.innerHTML = '<div class="decision-empty">正在调用大模型，请稍候...</div>';
+  addLog('开始推理请求...', 'info');
+
+  const sendMode = document.querySelector('input[name=sendMode]:checked')?.value || 'all';
+  let speakerFilter = null;
+  if (sendMode === 'selected') {
+    speakerFilter = getSelectedSpeakers();
+    if (!speakerFilter.length) {
+      area.innerHTML = '<div class="decision-error">请在左侧名单中勾选至少一名玩家</div>';
+      btn.disabled = false; btn.classList.remove('loading'); btn.textContent = '开始推理';
+      return;
+    }
+  }
+
+  const payload = {
+    session_id: currentSessionId,
+    self_player_number: parseInt(document.getElementById('cfgSeatNum').value) || 3,
+    self_player_id: document.getElementById('cfgPlayerId').value || 'player_1',
+    role_name: document.getElementById('cfgRoleName').value || '通灵',
+    alignment: document.getElementById('cfgAlignment').value || 'goose',
+    speaker_filter: speakerFilter,
+  };
+  try {
+    const res = await fetch(`${API}/api/inference`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    if (!res.ok) { const err = await res.json().catch(()=>({detail:res.statusText})); throw new Error(err.detail || `HTTP ${res.status}`); }
+    renderDecision(await res.json());
+    addLog('推理完成', 'info');
+  } catch(e) {
+    area.innerHTML = `<div class="decision-error">推理失败: ${escHtml(e.message)}</div>`;
+    addLog(`推理失败: ${e.message}`, 'error');
+  } finally { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = '开始推理'; }
+}
+
+function renderDecision(data) {
+  const area = document.getElementById('decisionArea');
+  document.getElementById('decisionTime').textContent = new Date().toLocaleTimeString();
+  const analysis = data.structured?.prior_speech_analysis || '';
+  const suggestion = data.content || '';
+  const warnings = data.structured?.warnings || [];
+  const debugPrompt = data.structured?.debug_prompt || '';
+  let html = '';
+  if (analysis) html += `<div class="decision-block"><h3>前序发言分析</h3><div class="content">${escHtml(analysis)}</div></div><hr class="decision-divider">`;
+  if (suggestion) html += `<div class="decision-block"><h3>发言建议</h3><div class="content">${escHtml(suggestion)}</div></div>`;
+  if (warnings.length) html += `<hr class="decision-divider"><div class="decision-block"><h3 style="color:#fbbf24">警告</h3><div class="content" style="color:#fbbf24">${warnings.map(w=>escHtml(w)).join('\n')}</div></div>`;
+  if (debugPrompt) {
+    html += `<hr class="decision-divider">
+      <div class="debug-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open');">发送给大模型的完整 Prompt</div>
+      <div class="debug-body"><div class="debug-prompt">${escHtml(debugPrompt)}</div></div>`;
+  }
+  area.innerHTML = html || '<div class="decision-empty">模型未返回有效结果</div>';
+}
+
+// ── Init ──
+fetchStatus();
+connectWS();
+fetch(`${API}/api/roster`).then(r=>r.json()).then(d=>{ if(d.roster?.length){ roster=d.roster; renderRoster(); } }).catch(()=>{});
+</script>
+</body>
+</html>
