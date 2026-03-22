@@ -1,0 +1,3 @@
+rag_summarize_prompt_path: prompts/rag_summarize.txt
+summarize_prompt_path: prompts/meeting_person_summarize.txt
+decision_agent_prompt_path: prompts/decision_agent.txt
