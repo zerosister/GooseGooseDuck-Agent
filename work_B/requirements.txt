@@ -1,4 +1,0 @@
-# RAG 规则库 PDF 解析（import fitz）
-pymupdf>=1.24.0
-# xlsx
-openpyxl>=3.1.0

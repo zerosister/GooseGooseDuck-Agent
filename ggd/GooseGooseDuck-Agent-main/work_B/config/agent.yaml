@@ -1,8 +1,0 @@
-# memory_agent
-memory_agent:
-  recent_n: 13   # 短期记忆最近n条
-
-decision_agent:
-  recent_ingestion_n: 0
-  max_rag_queries: 2
-  use_rag_summarize: true
