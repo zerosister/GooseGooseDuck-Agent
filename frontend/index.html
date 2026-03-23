@@ -33,6 +33,14 @@
   .btn-purple.loading { animation: pulse 1.5s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
 
+  .model-switch { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .model-switch span { font-size: 12px; color: #94a3b8; }
+  .model-switch .model-label { color: #e2e8f0; font-weight: 600; font-size: 12px; min-width: 90px; }
+  .toggle-track { width: 44px; height: 24px; border-radius: 12px; background: #3b82f6; cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .toggle-track.local { background: #22c55e; }
+  .toggle-track .toggle-knob { width: 20px; height: 20px; border-radius: 50%; background: white; position: absolute; top: 2px; left: 2px; transition: left 0.2s; }
+  .toggle-track.local .toggle-knob { left: 22px; }
+
   .main-grid { display: grid; grid-template-columns: 220px 1fr; gap: 16px; margin-bottom: 16px; }
   @media (max-width: 800px) { .main-grid { grid-template-columns: 1fr; } }
 
@@ -127,6 +135,13 @@
     <button class="btn-outline" onclick="takeScreenshot()">截图预览</button>
     <button class="btn-outline" onclick="scanRoster()">识别名单</button>
     <button class="btn-outline btn-sm" onclick="clearLog()">清空日志</button>
+    <div class="model-switch">
+      <span>LLM:</span>
+      <span class="model-label" id="modelLabel">API (通义千问)</span>
+      <div class="toggle-track" id="modelToggle" onclick="toggleModel()" title="点击切换本地/API模型">
+        <div class="toggle-knob"></div>
+      </div>
+    </div>
   </div>
 
   <div class="main-grid">
@@ -512,9 +527,43 @@ function renderDecision(data) {
   area.innerHTML = html || '<div class="decision-empty">模型未返回有效结果</div>';
 }
 
+// ── Model switch ──
+let currentBackend = 'api';
+function updateModelUI(backend) {
+  currentBackend = backend;
+  const toggle = document.getElementById('modelToggle');
+  const label = document.getElementById('modelLabel');
+  if (backend === 'local') {
+    toggle.classList.add('local');
+    label.textContent = '本地 Ollama';
+  } else {
+    toggle.classList.remove('local');
+    label.textContent = 'API (通义千问)';
+  }
+}
+async function toggleModel() {
+  const newBackend = currentBackend === 'api' ? 'local' : 'api';
+  try {
+    const res = await fetch(`${API}/api/set-model?backend=${newBackend}`, {method:'POST'});
+    const data = await res.json();
+    if (data.status === 'success') {
+      updateModelUI(data.backend);
+      addLog(`已切换为: ${data.label}`, 'info');
+    } else { addLog(`切换失败: ${data.detail||''}`, 'error'); }
+  } catch(e) { addLog(`切换失败: ${e.message}`, 'error'); }
+}
+async function fetchModelBackend() {
+  try {
+    const res = await fetch(`${API}/api/model-backend`);
+    const data = await res.json();
+    updateModelUI(data.backend);
+  } catch(e) {}
+}
+
 // ── Init ──
 fetchStatus();
 connectWS();
+fetchModelBackend();
 fetch(`${API}/api/roster`).then(r=>r.json()).then(d=>{ if(d.roster?.length){ roster=d.roster; renderRoster(); } }).catch(()=>{});
 </script>
 </body>

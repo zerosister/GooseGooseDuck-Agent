@@ -4,5 +4,5 @@ memory_agent:
 
 decision_agent:
   recent_ingestion_n: 0
-  max_rag_queries: 2
-  use_rag_summarize: true
+  # create_agent / LangGraph 单轮最大步数（含模型与工具节点），防止无限循环
+  recursion_limit: 25

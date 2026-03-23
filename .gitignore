@@ -3,3 +3,5 @@
 **/logs/
 .cursor/
 test_audio/
+test/
+.env

@@ -25,7 +25,7 @@ class RagSummarizeService(object):
         self.chain = self._init_chain()
 
     def _init_chain(self):
-        return self.prompt_template | self.model | StrOutputParser()
+        return self.prompt_template | self.debug_prompt | self.model | StrOutputParser()
     
     def retriever_docs(self, query: str) -> list[Document]:
         return self.retriever.invoke(query)
@@ -57,11 +57,15 @@ class RagSummarizeService(object):
         context_docs = self.retriever_docs(query)
         context = self._build_context(context_docs)
         return self.chain.invoke({"input": query, "context": context})
+    
+    def debug_prompt(self, prompt: str) -> str:
+        logger.debug(f"RAG summarize prompt: {prompt}")
+        return prompt
 
 
 if __name__ == "__main__":
     async def _demo() -> None:
         rag = RagSummarizeService()
-        print(await rag.arag_summarize("小户型适合什么样的扫地机器人？"))
+        print(await rag.arag_summarize("通灵者的技能介绍"))
 
     asyncio.run(_demo())

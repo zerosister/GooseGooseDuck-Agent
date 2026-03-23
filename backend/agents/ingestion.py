@@ -66,4 +66,3 @@ class IngestionAgent:
             sequence_id=self._next_seq(),
         )
         return await self.emit(output)
-

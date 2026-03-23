@@ -21,7 +21,7 @@ class MemoryAgent:
         ingestion_text = ingestions[-1].model_dump_json(indent=2, ensure_ascii=False)
         summary_text = self.chain.invoke({"ingestion": ingestion_text})
         player_state = PlayerState(
-            speaker_id=ingestions[-1].metadata.get("speaker_id"),
+            speaker_id=str(ingestions[-1].metadata.get("speaker_id") or "unknown"),
             latest_stance=summary_text,
             emotion_trend="稳定"
         )

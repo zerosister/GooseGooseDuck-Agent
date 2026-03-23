@@ -335,13 +335,13 @@ async def api_screenshot():
 
 @router.post("/api/scan-roster")
 async def api_scan_roster():
-    """Take screenshot and OCR extract player roster (number + name)."""
+    """Take screenshot and send to Gemini to extract player roster (number + name)."""
     if controller.hwnd is None:
         raise HTTPException(status_code=400, detail="未选择窗口")
 
     def _scan():
         from backend.legacy.screen_monitor import ScreenCapture
-        from backend.legacy.extract_speaker_num import extract_player_roster
+        from backend.services.gemini_roster import extract_player_roster_gemini
 
         cap = ScreenCapture(controller.hwnd)
         try:
@@ -350,7 +350,7 @@ async def api_scan_roster():
             cap.release()
         if img is None:
             return []
-        return extract_player_roster(img)
+        return extract_player_roster_gemini(img)
 
     roster = await asyncio.get_event_loop().run_in_executor(None, _scan)
     if roster:
@@ -362,6 +362,25 @@ async def api_scan_roster():
 @router.get("/api/roster")
 async def api_get_roster():
     return {"roster": controller.roster}
+
+
+@router.get("/api/model-backend")
+async def api_get_model_backend():
+    from backend.model.factory import get_current_backend
+    return {"backend": get_current_backend()}
+
+
+@router.post("/api/set-model")
+async def api_set_model(backend: str = "api"):
+    """Switch LLM backend between 'api' (DashScope) and 'local' (Ollama)."""
+    from backend.model.factory import set_model_backend, get_current_backend
+    try:
+        set_model_backend(backend)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    current = get_current_backend()
+    label = "本地 Ollama (qwen2.5:7b)" if current == "local" else "API (通义千问)"
+    return {"status": "success", "backend": current, "label": label}
 
 
 class InferenceRequest(BaseModel):

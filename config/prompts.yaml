@@ -1,3 +1,6 @@
 rag_summarize_prompt_path: backend/prompts/rag_summarize.txt
 summarize_prompt_path: backend/prompts/meeting_person_summarize.txt
-decision_agent_prompt_path: backend/prompts/decision_agent.txt
+# 鹅鸭杀角色目录与黑话，供会议总结 prompt 注入（纯文本，见文件内说明）
+meeting_game_context_path: data/meeting_game_context.txt
+decision_agent_system_prompt_path: backend/prompts/decision_agent_system.txt
+decision_agent_user_prompt_path: backend/prompts/decision_agent_user.txt

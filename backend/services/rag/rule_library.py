@@ -30,21 +30,22 @@ class RuleLibrary(object):
             chunk_overlap=self.rl["chunk_overlap"],
             separators=self.rl["separators"],
         )
+        self.load_document() # 每次启动时加载文档
 
     def get_retriever(self):
         return self.vec_store.as_retriever(search_kwargs={"k": self.rl["k"]})
 
     def load_document(self):
-        def check_md5_hex(md5_hex: str) -> bool:
+        def check_md5_hex(md5_hex: str) -> int:
             store_path = get_abs_path(self.rl["md5_hex_store"])
             if not os.path.exists(store_path):
                 open(store_path, "w", encoding="utf-8").close()
-                return False
+                return 0
             with open(store_path, "r", encoding="utf-8") as f:
                 for line in f.readlines():
                     if line.strip() == md5_hex:
-                        return True
-            return False
+                        return 1
+            return 2
 
         def save_md5_hex(md5_hex: str) -> None:
             with open(get_abs_path(self.rl["md5_hex_store"]), "a", encoding="utf-8") as f:
@@ -69,9 +70,16 @@ class RuleLibrary(object):
             md5_hex = get_file_md5_hex(path)
             if md5_hex is None:
                 continue
-            if check_md5_hex(md5_hex):
+            if check_md5_hex(md5_hex) == 1:
                 logger.info(f"Document {path} has been loaded.")
                 continue
+            elif check_md5_hex(md5_hex) == 2:
+                # 需要根据根据 metadata 中的路径值删除此前加载的文档
+                col = self.vec_store._collection  # LangChain Chroma 暴露的底层 collection
+                res = col.get(where={"source": path})  # 若你用的 Chroma 要求，则 where 写成 {"source": {"$eq": path}}
+                n = len(res["ids"])
+                self.vec_store.delete(where={"source": path})
+                logger.info(f"Document {path} {n} documents has been deleted.")
 
             try:
                 documents: list[Document] = get_file_documents(path)
@@ -94,7 +102,6 @@ class RuleLibrary(object):
 
 if __name__ == "__main__":
     vs = RuleLibrary()
-    vs.load_document()
     retriever = vs.get_retriever()
     res = retriever.invoke("超能力者")
     for r in res:
