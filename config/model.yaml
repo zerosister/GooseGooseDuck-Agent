@@ -1,0 +1,3 @@
+rag_model_name: qwen3-max
+agent_model_name: glm-5
+embedding_model_name: text-embedding-v4

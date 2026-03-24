@@ -1,6 +1,8 @@
 # memory_agent
 memory_agent:
   recent_n: 13   # 短期记忆最近n条
+  # create_agent 单轮最大步数（含模型与工具节点）
+  recursion_limit: 25
 
 decision_agent:
   recent_ingestion_n: 0

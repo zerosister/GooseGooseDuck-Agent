@@ -512,11 +512,13 @@ function renderDecision(data) {
   const area = document.getElementById('decisionArea');
   document.getElementById('decisionTime').textContent = new Date().toLocaleTimeString();
   const analysis = data.structured?.prior_speech_analysis || '';
+  const identity = data.structured?.identity_inference || '';
   const suggestion = data.content || '';
   const warnings = data.structured?.warnings || [];
   const debugPrompt = data.structured?.debug_prompt || '';
   let html = '';
   if (analysis) html += `<div class="decision-block"><h3>前序发言分析</h3><div class="content">${escHtml(analysis)}</div></div><hr class="decision-divider">`;
+  if (identity) html += `<div class="decision-block"><h3>玩家身份推测</h3><div class="content">${escHtml(identity)}</div></div><hr class="decision-divider">`;
   if (suggestion) html += `<div class="decision-block"><h3>发言建议</h3><div class="content">${escHtml(suggestion)}</div></div>`;
   if (warnings.length) html += `<hr class="decision-divider"><div class="decision-block"><h3 style="color:#fbbf24">警告</h3><div class="content" style="color:#fbbf24">${warnings.map(w=>escHtml(w)).join('\n')}</div></div>`;
   if (debugPrompt) {

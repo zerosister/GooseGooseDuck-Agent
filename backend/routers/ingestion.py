@@ -435,6 +435,7 @@ async def api_inference(req: InferenceRequest):
         content=result.speech_suggestion,
         structured={
             "prior_speech_analysis": result.prior_speech_analysis,
+            "identity_inference": result.identity_inference,
             "rag_queries_used": result.rag_queries_used,
             "warnings": result.warnings,
             "debug_prompt": result.debug_prompt or "",

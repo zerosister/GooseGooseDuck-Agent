@@ -1,7 +1,7 @@
 rule_library:
   collection_name: rule_library
   persist_directory: data/rule_library_db
-  k: 3
+  k: 7
   data_path: data/rule_library
   md5_hex_store: data/rule_library_md5.txt
   allow_knowledge_files_type: ['.txt', '.pdf', '.xlsx']

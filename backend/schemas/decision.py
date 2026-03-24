@@ -56,6 +56,10 @@ class DecisionContext(BaseModel):
 
 class DecisionResult(BaseModel):
     prior_speech_analysis: str = Field(...)
+    identity_inference: str = Field(
+        default="",
+        description="对玩家身份的推测（对应输出中的【玩家身份推测】）",
+    )
     speech_suggestion: str = Field(...)
     rag_queries_used: list[str] = Field(default_factory=list)
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)

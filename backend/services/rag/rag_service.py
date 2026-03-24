@@ -10,7 +10,7 @@ from backend.services.rag.rule_library import RuleLibrary
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
-from backend.model.factory import chat_model
+from backend.model.factory import rag_chat_model
 from backend.utils.logger_handler import logger
 from backend.utils.prompt_loader import load_rag_prompts
 
@@ -21,7 +21,7 @@ class RagSummarizeService(object):
         self.retriever = self.rule_library.get_retriever()
         self.prompt_text = load_rag_prompts()
         self.prompt_template = PromptTemplate.from_template(self.prompt_text)
-        self.model = chat_model
+        self.model = rag_chat_model
         self.chain = self._init_chain()
 
     def _init_chain(self):
@@ -66,6 +66,6 @@ class RagSummarizeService(object):
 if __name__ == "__main__":
     async def _demo() -> None:
         rag = RagSummarizeService()
-        print(await rag.arag_summarize("通灵者的技能介绍"))
+        print(await rag.arag_summarize("无责刀"))
 
     asyncio.run(_demo())

@@ -9,27 +9,60 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from backend.schemas.contract import IngestionOutput, MemorySummary
 from backend.schemas.decision import DecisionContext, DecisionResult
-from backend.model.factory import chat_model
+from backend.model.factory import agent_chat_model
 from backend.services import rag_query
 from backend.utils.config_handler import agent_conf
 from backend.utils.logger_handler import logger
 from backend.utils.prompt_loader import load_decision_prompts
 
 
-def _parse_marked_output(text: str) -> tuple[str, str, list[str]]:
+def _parse_marked_output(text: str) -> tuple[str, str, str, list[str]]:
+    """解析模型按【前序发言分析】/【玩家身份推测】/【发言建议】三段标记的输出。"""
     warnings: list[str] = []
     m_prior = "【前序发言分析】"
     m_identity = "【玩家身份推测】"
     m_sug = "【发言建议】"
-    if m_prior not in text or m_sug not in text:
-        warnings.append("模型未按标记格式输出，已回退为全文归入分析段")
-        return text.strip(), "", warnings
-    _, rest = text.split(m_prior, 1)
-    if m_sug in rest:
-        prior, _, sug = rest.partition(m_sug)
-        return prior.strip(), sug.strip(), warnings
-    warnings.append("缺少【发言建议】标记")
-    return rest.strip(), "", warnings
+
+    if not (text or "").strip():
+        return "", "", "", warnings
+
+    raw = text.strip()
+    i_prior = raw.find(m_prior)
+    i_id = raw.find(m_identity)
+    i_sug = raw.find(m_sug)
+
+    prior = ""
+    identity = ""
+    suggestion = ""
+
+    if i_prior >= 0:
+        if i_id >= 0 and i_id > i_prior:
+            prior = raw[i_prior + len(m_prior) : i_id].strip()
+        elif i_sug >= 0 and i_sug > i_prior:
+            prior = raw[i_prior + len(m_prior) : i_sug].strip()
+        else:
+            prior = raw[i_prior + len(m_prior) :].strip()
+    else:
+        warnings.append("未找到【前序发言分析】标记")
+
+    if i_id >= 0:
+        if i_sug >= 0 and i_sug > i_id:
+            identity = raw[i_id + len(m_identity) : i_sug].strip()
+        else:
+            identity = raw[i_id + len(m_identity) :].strip()
+    elif i_prior >= 0 and i_sug >= 0:
+        warnings.append("未找到【玩家身份推测】标记（兼容旧两段格式时身份推测为空）")
+
+    if i_sug >= 0:
+        suggestion = raw[i_sug + len(m_sug) :].strip()
+    else:
+        warnings.append("未找到【发言建议】标记")
+
+    if i_prior < 0 and i_id < 0 and i_sug < 0:
+        warnings.append("输出未包含分段标记，全文暂作发言建议展示")
+        suggestion = raw
+
+    return prior, identity, suggestion, warnings
 
 
 def _collect_rag_queries(messages: list[BaseMessage]) -> list[str]:
@@ -86,9 +119,20 @@ class DecisionAgent:
     system / user 模板由 prompts.yaml 配置。
     """
 
-    def __init__(self, model=None):
-        self._system_prompt, self._user_template = load_decision_prompts()
-        self.model = model or chat_model
+    def __init__(
+        self,
+        model=None,
+        system_prompt: str | None = None,
+        user_template: str | None = None,
+    ):
+        loaded_sys, loaded_user = load_decision_prompts()
+        self._system_prompt = (
+            system_prompt if system_prompt is not None else loaded_sys
+        )
+        self._user_template = (
+            user_template if user_template is not None else loaded_user
+        )
+        self.model = model or agent_chat_model
         self.agent = create_agent(
             model=self.model,
             tools=[rag_query],
@@ -144,7 +188,7 @@ class DecisionAgent:
         if not raw:
             warnings.append("模型未返回可解析的文本内容")
         rag_queries_used = _collect_rag_queries(messages)
-        prior, suggestion, parse_warnings = _parse_marked_output(raw or "")
+        prior, identity, suggestion, parse_warnings = _parse_marked_output(raw or "")
         warnings.extend(parse_warnings)
 
         debug_prompt = _build_debug_prompt(
@@ -153,6 +197,7 @@ class DecisionAgent:
 
         return DecisionResult(
             prior_speech_analysis=prior,
+            identity_inference=identity,
             speech_suggestion=suggestion,
             rag_queries_used=rag_queries_used,
             warnings=warnings,
@@ -163,8 +208,10 @@ class DecisionAgent:
 if __name__ == "__main__":
     sample = """【前序发言分析】
 a
+【玩家身份推测】
+3号-测试-未知
 【发言建议】
 b
 """
-    p, s, w = _parse_marked_output(sample)
-    print("parse:", p, s, w)
+    p, i, s, w = _parse_marked_output(sample)
+    print("parse:", p, i, s, w)
