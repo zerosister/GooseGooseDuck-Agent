@@ -30,6 +30,12 @@ ALLOWED_MSGPACK_MODULES = [
     ("backend.schemas.decision", "EliminationRecord"),
     ("backend.schemas.decision", "MeetingRoundState"),
     ("backend.schemas.graph_state", "MemoryDecisionState"),
+    ("backend.schemas.graph_state", "SituationSketch"),
+    ("backend.schemas.graph_state", "GameSettings"),
+    ("backend.schemas.graph_state", "PlayerRosterEntry"),
+    ("backend.schemas.graph_state", "EliminationRecord"),
+    ("backend.schemas.graph_state", "VoteRecord"),
+    ("backend.schemas.graph_state", "MeetingRoundState"),
 ]
 
 class ShortTermMemoryStore:

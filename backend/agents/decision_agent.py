@@ -1,19 +1,32 @@
+from langchain_core.messages.base import BaseMessage
+
+
 from __future__ import annotations
 
-import asyncio
 import json
-from typing import Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain.agents import create_agent
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+from backend.agents.middleware import (
+    DecisionAgentContext,
+    before_agent_middleware,
+    decision_phase_prompt_middleware,
+    monitor_tool,
+    situation_sketch_model_context,
+)
 from backend.schemas.contract import IngestionOutput, MemorySummary
-from backend.schemas.decision import DecisionContext, DecisionResult
-from backend.model.factory import agent_chat_model
+from backend.schemas.graph_state import SituationSketch
+from backend.schemas.decision import DecisionResult, RuleCriticReview
+from backend.model.factory import get_decision_chat_model_stream
 from backend.services import rag_query
 from backend.utils.config_handler import agent_conf
 from backend.utils.logger_handler import logger
-from backend.utils.prompt_loader import load_decision_prompts
+from backend.utils.prompt_loader import load_decision_prompts, load_decision_revise_prompts
+from backend.agents import last_ai_text, stream_deltas_from_chunk
 
 
 def _parse_marked_output(text: str) -> tuple[str, str, str, list[str]]:
@@ -65,37 +78,6 @@ def _parse_marked_output(text: str) -> tuple[str, str, str, list[str]]:
     return prior, identity, suggestion, warnings
 
 
-def _collect_rag_queries(messages: list[BaseMessage]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for m in messages:
-        if not isinstance(m, AIMessage) or not m.tool_calls:
-            continue
-        for tc in m.tool_calls:
-            if tc.get("name") != "rag_query":
-                continue
-            args = tc.get("args") or {}
-            q = args.get("query")
-            if isinstance(q, str) and q.strip() and q not in seen:
-                seen.add(q)
-                out.append(q.strip())
-    return out
-
-
-def _last_ai_text(messages: list[BaseMessage]) -> str:
-    for m in reversed(messages):
-        if not isinstance(m, AIMessage):
-            continue
-        if m.tool_calls:
-            continue
-        if isinstance(m.content, str) and m.content.strip():
-            return m.content.strip()
-    for m in reversed(messages):
-        if isinstance(m, AIMessage) and isinstance(m.content, str) and m.content.strip():
-            return m.content.strip()
-    return ""
-
-
 def _build_debug_prompt(
     system_prompt: str, user_content: str, messages: list[BaseMessage]
 ) -> str:
@@ -113,10 +95,16 @@ def _build_debug_prompt(
     return "".join(lines)
 
 
+def _require_stream_model(model: BaseChatModel) -> None:
+    if not callable(getattr(model, "astream", None)):
+        raise RuntimeError(
+            "DecisionAgent 需要支持流式 (astream) 的 Chat 模型；当前模型不可用。"
+        )
+
+
 class DecisionAgent:
     """
-    决策：LangChain create_agent 工具循环，按需调用 rag_query；
-    system / user 模板由 prompts.yaml 配置。
+    决策：仅流式 create_agent + rag_query；草案/修订通过 runtime context 切换 system prompt。
     """
 
     def __init__(
@@ -126,83 +114,227 @@ class DecisionAgent:
         user_template: str | None = None,
     ):
         loaded_sys, loaded_user = load_decision_prompts()
+        rev_sys, rev_user = load_decision_revise_prompts()
         self._system_prompt = (
             system_prompt if system_prompt is not None else loaded_sys
         )
         self._user_template = (
             user_template if user_template is not None else loaded_user
         )
-        self.model = model or agent_chat_model
+        self._revise_system = rev_sys
+        self._revise_user_template = rev_user
+        stream_model = model if model is not None else get_decision_chat_model_stream()
+        if not isinstance(stream_model, BaseChatModel):
+            raise TypeError("DecisionAgent model must be a BaseChatModel instance")
+        _require_stream_model(stream_model)
+        self.model = stream_model
         self.agent = create_agent(
             model=self.model,
             tools=[rag_query],
             system_prompt=self._system_prompt,
-            middleware=[],
+            context_schema=DecisionAgentContext,
+            middleware=[
+                situation_sketch_model_context,
+                decision_phase_prompt_middleware(
+                    self._system_prompt, self._revise_system
+                ),
+                monitor_tool,
+                before_agent_middleware,
+            ],
         )
-        logger.info("DecisionAgent initialized (create_agent + rag_query)")
+        logger.info("DecisionAgent initialized (stream-only create_agent + rag_query)")
 
     def _decision_conf(self) -> dict:
         return agent_conf.get("decision_agent", {})
 
-    async def run(
+    def _draft_user_payload(
         self,
-        ctx: DecisionContext,
         memory: MemorySummary,
-        ingestions: list[IngestionOutput] | None = None,
-    ) -> DecisionResult:
-        conf = self._decision_conf()
-        recent_n = int(conf.get("recent_ingestion_n", 20))
-        recursion_limit = int(conf.get("recursion_limit", 25))
-
-        warnings: list[str] = []
-
-        recent = list(ingestions or [])
-        if recent_n > 0 and len(recent) > recent_n:
-            recent = recent[-recent_n:]
-        recent_json = json.dumps(
-            [x.model_dump() for x in recent],
-            ensure_ascii=False,
-            indent=2,
-        )
-
+    ) -> tuple[str, str]:
         payload = {
-            "decision_context": ctx.model_dump_json(indent=2, ensure_ascii=False),
             "memory_summary": memory.model_dump_json(indent=2, ensure_ascii=False),
-            "recent_ingestions": recent_json,
         }
         user_content = self._user_template.format(**payload)
-        logger.info("DecisionAgent user payload keys: %s", list(payload.keys()))
+        return user_content
+
+    async def run_draft_stream(
+        self,
+        memory: MemorySummary,
+        situation_sketch: SituationSketch | None = None,
+        situation_sketch_narrative: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """首轮决策草稿流式：yield 增量事件，最后 yield draft_complete 含 DecisionResult。"""
+        conf = self._decision_conf()
+        recursion_limit = int(conf.get("recursion_limit", 25))
+        user_content = self._draft_user_payload(memory)
+        logger.info("DecisionAgent user payload keys: memory_summary")
 
         invoke_config = {"recursion_limit": recursion_limit}
         input_state = {"messages": [HumanMessage(content=user_content)]}
+        phase_ctx = DecisionAgentContext(
+            phase="draft",
+            situation_sketch=situation_sketch,
+            situation_sketch_narrative=situation_sketch_narrative,
+        )
 
+        messages: list[BaseMessage] | None = None
         try:
-            result = await self.agent.ainvoke(input_state, invoke_config)
-        except (AttributeError, NotImplementedError, TypeError):
-            result = await asyncio.to_thread(
-                self.agent.invoke, input_state, invoke_config
+            async for event in self.agent.astream_events(
+                input_state,
+                invoke_config,
+                version="v2",
+                context=phase_ctx,
+            ):
+                et = event.get("event")
+                if et == "on_chat_model_stream":
+                    chunk = (event.get("data") or {}).get("chunk")
+                    for kind, delta in stream_deltas_from_chunk(chunk):
+                        yield {"type": kind, "delta": delta}
+                elif et == "on_tool_start":
+                    name = (event.get("data") or {}).get("name") or event.get("name")
+                    yield {"type": "tool_start", "name": str(name or "")}
+                elif et == "on_tool_end":
+                    name = (event.get("data") or {}).get("name") or event.get("name")
+                    yield {"type": "tool_end", "name": str(name or "")}
+                elif et == "on_chain_end":
+                    out = (event.get("data") or {}).get("output")
+                    if isinstance(out, dict) and out.get("messages") is not None:
+                        messages = list[BaseMessage](out["messages"])
+        except Exception as e:
+            logger.error("DecisionAgent.run_draft_stream: astream_events failed: %s", e)
+            raise RuntimeError(
+                "决策草稿流式失败（不支持非流式回退）。请检查模型是否支持流式。"
+            ) from e
+
+        if messages is None:
+            raise RuntimeError(
+                "决策草稿流未返回最终 messages，请检查 LangGraph 与模型流式配置。"
             )
 
-        messages: list[BaseMessage] = list(result.get("messages") or [])
-        raw = _last_ai_text(messages)
+        raw = last_ai_text(messages)
+        warnings: list[str] = []
         if not raw:
             warnings.append("模型未返回可解析的文本内容")
-        rag_queries_used = _collect_rag_queries(messages)
+        prior, identity, suggestion, parse_warnings = _parse_marked_output(raw or "")
+        warnings.extend(parse_warnings)
+        debug_prompt = _build_debug_prompt(
+            self._system_prompt, user_content, messages
+        )
+        dr = DecisionResult(
+            prior_speech_analysis=prior,
+            identity_inference=identity,
+            speech_suggestion=suggestion,
+            warnings=warnings,
+            debug_prompt=debug_prompt,
+        )
+        yield {"type": "draft_complete", "result": dr.model_dump()}
+
+    async def revise_from_critic_stream(
+        self,
+        result: DecisionResult,
+        review: RuleCriticReview,
+        iteration: int = 0,
+        situation_sketch: SituationSketch | None = None,
+        situation_sketch_narrative: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """根据判官意见修订三段输出（流式）。"""
+        conf = self._decision_conf()
+        recursion_limit = int(conf.get("recursion_limit", 25))
+        
+        payload = {
+            "critic_review_json": review.model_dump_json(indent=2, ensure_ascii=False),
+            "prior_speech_analysis": result.prior_speech_analysis or "",
+            "identity_inference": result.identity_inference or "",
+            "speech_suggestion": result.speech_suggestion or "",
+        }
+        user_content = self._revise_user_template.format(**payload)
+        invoke_config = {"recursion_limit": recursion_limit}
+        input_state = {"messages": [HumanMessage(content=user_content)]}
+        phase_ctx = DecisionAgentContext(
+            phase="revise",
+            situation_sketch=situation_sketch,
+            situation_sketch_narrative=situation_sketch_narrative,
+        )
+
+        messages: list[BaseMessage] | None = None
+        try:
+            async for event in self.agent.astream_events(
+                input_state,
+                invoke_config,
+                version="v2",
+                context=phase_ctx,
+            ):
+                et = event.get("event")
+                if et == "on_chat_model_stream":
+                    chunk = (event.get("data") or {}).get("chunk")
+                    for kind, delta in stream_deltas_from_chunk(chunk):
+                        yield {
+                            "type": kind,
+                            "delta": delta,
+                            "iteration": iteration,
+                            "phase": "revise",
+                        }
+                elif et == "on_tool_start":
+                    name = (event.get("data") or {}).get("name") or event.get("name")
+                    yield {
+                        "type": "tool_start",
+                        "name": str(name or ""),
+                        "iteration": iteration,
+                        "phase": "revise",
+                    }
+                elif et == "on_tool_end":
+                    name = (event.get("data") or {}).get("name") or event.get("name")
+                    yield {
+                        "type": "tool_end",
+                        "name": str(name or ""),
+                        "iteration": iteration,
+                        "phase": "revise",
+                    }
+                elif et == "on_chain_end":
+                    out = (event.get("data") or {}).get("output")
+                    if isinstance(out, dict) and out.get("messages") is not None:
+                        messages = list(out["messages"])
+        except Exception as e:
+            logger.error(
+                "DecisionAgent.revise_from_critic_stream: astream_events failed: %s",
+                e,
+            )
+            raise RuntimeError(
+                "决策修订流式失败（不支持非流式回退）。请检查模型是否支持流式。"
+            ) from e
+
+        if messages is None:
+            raise RuntimeError(
+                "决策修订流未返回最终 messages，请检查 LangGraph 与模型流式配置。"
+            )
+
+        raw = last_ai_text(messages)
+        warnings = list(result.warnings)
+        if not raw:
+            warnings.append("修订阶段模型未返回可解析文本，保留上一轮输出")
         prior, identity, suggestion, parse_warnings = _parse_marked_output(raw or "")
         warnings.extend(parse_warnings)
 
         debug_prompt = _build_debug_prompt(
-            self._system_prompt, user_content, messages
+            self._revise_system, user_content, messages
         )
 
-        return DecisionResult(
-            prior_speech_analysis=prior,
-            identity_inference=identity,
-            speech_suggestion=suggestion,
-            rag_queries_used=rag_queries_used,
+        dr = DecisionResult(
+            prior_speech_analysis=prior or result.prior_speech_analysis,
+            identity_inference=identity or result.identity_inference,
+            speech_suggestion=suggestion or result.speech_suggestion,
             warnings=warnings,
             debug_prompt=debug_prompt,
+            rule_hits=result.rule_hits,
+            rule_critic_notes=result.rule_critic_notes,
+            rule_critic_debug_prompt=result.rule_critic_debug_prompt,
         )
+        yield {
+            "type": "revise_complete",
+            "result": dr.model_dump(),
+            "iteration": iteration,
+            "phase": "revise",
+        }
 
 
 if __name__ == "__main__":

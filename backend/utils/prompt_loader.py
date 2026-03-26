@@ -52,3 +52,71 @@ def load_decision_prompts() -> tuple[str, str]:
         logger.error(f"[load_decision_prompts] Failed to load: {e}")
         raise e
     return system_text, user_text
+
+
+def load_rule_critic_memory_prompts() -> tuple[str, str]:
+    try:
+        system_path = get_abs_path(
+            prompts_conf["rule_critic_memory_system_prompt_path"]
+        )
+        user_path = get_abs_path(prompts_conf["rule_critic_memory_user_prompt_path"])
+    except KeyError as e:
+        logger.error(f"[load_rule_critic_memory_prompts] missing key {e}")
+        raise e
+    system_text = open(system_path, "r", encoding="utf-8").read()
+    user_text = open(user_path, "r", encoding="utf-8").read()
+    return system_text, user_text
+
+
+def load_rule_critic_decision_prompts() -> tuple[str, str]:
+    try:
+        system_path = get_abs_path(
+            prompts_conf["rule_critic_decision_system_prompt_path"]
+        )
+        user_path = get_abs_path(prompts_conf["rule_critic_decision_user_prompt_path"])
+    except KeyError as e:
+        logger.error(f"[load_rule_critic_decision_prompts] missing key {e}")
+        raise e
+    system_text = open(system_path, "r", encoding="utf-8").read()
+    user_text = open(user_path, "r", encoding="utf-8").read()
+    return system_text, user_text
+
+
+def load_memory_revise_prompts() -> tuple[str, str]:
+    try:
+        system_path = get_abs_path(
+            prompts_conf["memory_agent_revise_system_prompt_path"]
+        )
+        user_path = get_abs_path(prompts_conf["memory_agent_revise_user_prompt_path"])
+    except KeyError as e:
+        logger.error(f"[load_memory_revise_prompts] missing key {e}")
+        raise e
+    system_text = open(system_path, "r", encoding="utf-8").read()
+    user_text = open(user_path, "r", encoding="utf-8").read()
+    return system_text, user_text
+
+
+def load_decision_revise_prompts() -> tuple[str, str]:
+    try:
+        system_path = get_abs_path(
+            prompts_conf["decision_agent_revise_system_prompt_path"]
+        )
+        user_path = get_abs_path(prompts_conf["decision_agent_revise_user_prompt_path"])
+    except KeyError as e:
+        logger.error(f"[load_decision_revise_prompts] missing key {e}")
+        raise e
+    system_text = open(system_path, "r", encoding="utf-8").read()
+    user_text = open(user_path, "r", encoding="utf-8").read()
+    return system_text, user_text
+
+
+def load_situation_sketch_prompts() -> tuple[str, str]:
+    try:
+        system_path = get_abs_path(prompts_conf["situation_sketch_system_prompt_path"])
+        user_path = get_abs_path(prompts_conf["situation_sketch_user_prompt_path"])
+    except KeyError as e:
+        logger.error(f"[load_situation_sketch_prompts] missing key {e}")
+        raise e
+    system_text = open(system_path, "r", encoding="utf-8").read()
+    user_text = open(user_path, "r", encoding="utf-8").read()
+    return system_text, user_text

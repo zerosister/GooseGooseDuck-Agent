@@ -93,6 +93,8 @@
   .decision-divider { border: none; border-top: 1px solid #334155; margin: 8px 14px; }
   .decision-empty { padding: 30px; text-align: center; color: #475569; font-size: 13px; }
   .decision-error { padding: 14px; color: #f87171; font-size: 13px; }
+  .decision-stream-pre { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; font-family: 'Cascadia Code','Consolas',monospace; max-height: 320px; overflow-y: auto; }
+  .decision-stream-hint { font-size: 11px; color: #64748b; margin-bottom: 8px; }
 
   .debug-toggle { cursor: pointer; user-select: none; color: #94a3b8; font-size: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 6px; }
   .debug-toggle:hover { color: #e2e8f0; }
@@ -475,8 +477,17 @@ async function runInference() {
     return;
   }
   btn.disabled = true; btn.classList.add('loading'); btn.textContent = '推理中...';
-  area.innerHTML = '<div class="decision-empty">正在调用大模型，请稍候...</div>';
-  addLog('开始推理请求...', 'info');
+  document.getElementById('decisionTime').textContent = '…';
+  area.innerHTML = `<div class="decision-block">
+    <p class="decision-stream-hint">全链路流式：草稿 → 规则判官 → 修订；完成后展示结构化结果。</p>
+    <p class="decision-stream-hint">1. 草稿</p>
+    <pre class="decision-stream-pre" id="decisionStreamPreDraft"></pre>
+    <p class="decision-stream-hint">2. 规则判官</p>
+    <pre class="decision-stream-pre" id="decisionStreamPreCritic"></pre>
+    <p class="decision-stream-hint">3. 修订</p>
+    <pre class="decision-stream-pre" id="decisionStreamPreRevise"></pre>
+  </div>`;
+  addLog('开始流式推理…', 'info');
 
   const sendMode = document.querySelector('input[name=sendMode]:checked')?.value || 'all';
   let speakerFilter = null;
@@ -497,15 +508,122 @@ async function runInference() {
     alignment: document.getElementById('cfgAlignment').value || 'goose',
     speaker_filter: speakerFilter,
   };
+
+  const preDraft = () => document.getElementById('decisionStreamPreDraft');
+  const preCritic = () => document.getElementById('decisionStreamPreCritic');
+  const preRevise = () => document.getElementById('decisionStreamPreRevise');
+  let bufDraft = '';
+  let bufCritic = '';
+  let bufRevise = '';
+  let gotDone = false;
+
+  function flushPhase(ev, text) {
+    const ph = ev.phase || 'draft';
+    if (ph === 'critic') {
+      bufCritic += text;
+      const el = preCritic();
+      if (el) el.textContent = bufCritic;
+    } else if (ph === 'revise') {
+      bufRevise += text;
+      const el = preRevise();
+      if (el) el.textContent = bufRevise;
+    } else {
+      bufDraft += text;
+      const el = preDraft();
+      if (el) el.textContent = bufDraft;
+    }
+  }
+
   try {
-    const res = await fetch(`${API}/api/inference`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-    if (!res.ok) { const err = await res.json().catch(()=>({detail:res.statusText})); throw new Error(err.detail || `HTTP ${res.status}`); }
-    renderDecision(await res.json());
-    addLog('推理完成', 'info');
-  } catch(e) {
+    const res = await fetch(`${API}/api/inference/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(typeof err.detail === 'string' ? err.detail : `HTTP ${res.status}`);
+    }
+    if (!res.body) throw new Error('响应无 body');
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (value) buffer += dec.decode(value, { stream: true });
+      const parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop() || '';
+      for (const block of parts) {
+        const line = block.split(/\r?\n/).find(l => /^data:\s*/.test(l));
+        if (!line) continue;
+        const jsonStr = line.replace(/^data:\s*/, '').trim();
+        let ev;
+        try { ev = JSON.parse(jsonStr); } catch { continue; }
+        if (ev.type === 'error') {
+          const d = ev.detail || ev.message || '未知错误';
+          area.innerHTML = `<div class="decision-error">推理失败: ${escHtml(String(d))}</div>`;
+          addLog(`推理失败: ${d}`, 'error');
+          return;
+        }
+        if (ev.type === 'thinking' || ev.type === 'content') {
+          flushPhase(ev, ev.delta || '');
+        } else if (ev.type === 'tool_start') {
+          flushPhase(ev, `\n[工具开始: ${ev.name || ''}]\n`);
+        } else if (ev.type === 'tool_end') {
+          flushPhase(ev, `[工具结束: ${ev.name || ''}]\n`);
+        } else if (ev.type === 'critic_round_start') {
+          bufCritic += `\n—— 判官轮次 iteration=${ev.iteration ?? ''} ——\n`;
+          const el = preCritic();
+          if (el) el.textContent = bufCritic;
+        } else if (ev.type === 'revise_round_start') {
+          bufRevise += `\n—— 修订轮次 iteration=${ev.iteration ?? ''} ——\n`;
+          const el = preRevise();
+          if (el) el.textContent = bufRevise;
+        } else if (ev.type === 'critic_complete') {
+          const r = ev.review || {};
+          bufCritic += `\n[判官结果 approved=${r.approved}] issues: ${(r.issues || []).slice(0, 3).join('；')}\n`;
+          const el = preCritic();
+          if (el) el.textContent = bufCritic;
+        } else if (ev.type === 'revise_complete') {
+          bufRevise += '\n[本轮修订已写入]\n';
+          const el = preRevise();
+          if (el) el.textContent = bufRevise;
+        } else if (ev.type === 'decision_critic_done') {
+          /* 内部阶段结束，不追加文本 */
+        } else if (ev.type === 'draft_complete') {
+          bufDraft += '\n\n—— 草稿段落已生成 ——\n\n';
+          const el = preDraft();
+          if (el) el.textContent = bufDraft;
+        } else if (ev.type === 'done') {
+          gotDone = true;
+          const r = ev.result || {};
+          renderDecision({
+            content: r.speech_suggestion,
+            structured: {
+              prior_speech_analysis: r.prior_speech_analysis,
+              identity_inference: r.identity_inference,
+              rag_queries_used: r.rag_queries_used || [],
+              warnings: r.warnings || [],
+              debug_prompt: r.debug_prompt || '',
+            },
+          });
+          addLog('推理完成（流式）', 'info');
+        }
+      }
+      if (done) break;
+    }
+    if (!gotDone) {
+      area.innerHTML = '<div class="decision-error">流式结束但未收到最终结果，请重试</div>';
+      addLog('流式未收到 done 事件', 'error');
+    }
+  } catch (e) {
     area.innerHTML = `<div class="decision-error">推理失败: ${escHtml(e.message)}</div>`;
     addLog(`推理失败: ${e.message}`, 'error');
-  } finally { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = '开始推理'; }
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = '开始推理';
+  }
 }
 
 function renderDecision(data) {

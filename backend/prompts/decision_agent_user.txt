@@ -1,10 +1,4 @@
-以下为 JSON（UTF-8）块，依次为：DecisionContext（**内含 player_roster**）、MemorySummary、最近发言列表（可为空数组）。规则类信息请通过工具 **rag_query** 自行检索，不要假设本消息中附有规则摘录。
-
------ DecisionContext -----
-{decision_context}
+以下为 JSON（UTF-8）块：MemorySummary。规则类信息请通过工具 **rag_query** 自行检索，不要假设本消息中附有规则摘录。
 
 ----- MemorySummary -----
 {memory_summary}
-
------ RecentIngestions -----
-{recent_ingestions}

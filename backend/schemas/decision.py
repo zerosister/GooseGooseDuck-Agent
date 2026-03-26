@@ -9,49 +9,20 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-EliminationCause = Literal[
-    "vote",
-    "kill",
-    "explosion",
-    "pelican",
-    "professional_kill",
-    "other",
-]
+class RuleCriticReview(BaseModel):
+    """规则判官输出：挑刺与改正指引，不替代 Agent 全文。"""
 
-
-class EliminationRecord(BaseModel):
-    victim_id: str = Field(..., description="出局玩家 ID")
-    cause: EliminationCause | str = Field(...)
-    meeting_index: Optional[int] = None
-    round_index: Optional[int] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class MeetingRoundState(BaseModel):
-    round_id: str = Field(...)
-    eliminations: list[EliminationRecord] = Field(default_factory=list)
-    notes: Optional[str] = None
-
-
-PlayerAlignment = Literal["goose", "duck", "neutral", "unknown"]
-
-
-class PlayerRosterEntry(BaseModel):
-    player_id: str = Field(...)
-    seat_number: int = Field(...)
-    color: str = Field(...)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class DecisionContext(BaseModel):
-    session_id: str = Field(...)
-    self_player_number: int = Field(..., description="当前 assisted 玩家座位号")
-    self_player_id: str = Field(..., description="当前 assisted 玩家 ID")
-    role_name: str = Field(...)
-    alignment: PlayerAlignment | str = Field(default="unknown")
-    rounds: list[MeetingRoundState] = Field(default_factory=list)
-    player_roster: list[PlayerRosterEntry] = Field(default_factory=list)
-    extra: dict[str, Any] = Field(default_factory=dict)
+    approved: bool = Field(
+        ...,
+        description="是否认为当前输出可结束修订循环",
+    )
+    issues: list[str] = Field(default_factory=list, description="挑刺要点")
+    correction_instructions: str = Field(
+        default="",
+        description="给 Memory/Decision Agent 的改正说明",
+    )
+    rule_hits: list[str] = Field(default_factory=list, description="硬问题摘要")
+    raw_notes: Optional[str] = Field(None, description="审计/备注")
 
 
 class DecisionResult(BaseModel):
@@ -61,7 +32,18 @@ class DecisionResult(BaseModel):
         description="对玩家身份的推测（对应输出中的【玩家身份推测】）",
     )
     speech_suggestion: str = Field(...)
-    rag_queries_used: list[str] = Field(default_factory=list)
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
     debug_prompt: Optional[str] = Field(None, description="渲染后发送给 LLM 的完整 prompt（调试用）")
+    rule_hits: list[str] = Field(
+        default_factory=list,
+        description="规则校对时命中的问题点简述",
+    )
+    rule_critic_notes: Optional[str] = Field(
+        None,
+        description="规则 Agent 校对说明",
+    )
+    rule_critic_debug_prompt: Optional[str] = Field(
+        None,
+        description="规则校对阶段完整 prompt（调试用）",
+    )

@@ -8,3 +8,22 @@ decision_agent:
   recent_ingestion_n: 0
   # create_agent / LangGraph 单轮最大步数（含模型与工具节点），防止无限循环
   recursion_limit: 25
+
+# 规则校对 Agent（memory 图内节点 + decision API 后置）
+rule_critic:
+  enabled: true
+  # 判官—Agent 修订循环最大次数（记忆与决策各自计数）
+  max_iterations: 3
+  memory_max_iterations: 3
+  decision_max_iterations: 3
+  recursion_limit: 15
+  timeout_seconds: 120
+  memory_timeout_seconds: 120
+  decision_timeout_seconds: 120
+
+# 轻量局势笔记（ingestion 后防抖异步，非完整决策）
+situation_sketch:
+  enabled: true
+  debounce_ms: 800
+  timeout_seconds: 120
+  recent_ingestion_n: 20

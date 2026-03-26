@@ -1,0 +1,168 @@
+"""LangChain Agent 中间件：按运行时 context 切换 system prompt（草案/修订、记忆判官/决策判官）。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Literal
+
+from langchain.agents import AgentState
+from langchain.agents.middleware import (
+    ModelRequest,
+    ModelResponse,
+    dynamic_prompt,
+    wrap_model_call,
+    wrap_tool_call,
+    before_agent,
+)
+from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import SystemMessage, ToolMessage
+from langgraph.runtime import Runtime
+from langgraph.types import Command
+
+from backend.schemas.graph_state import SituationSketch
+from backend.utils.logger_handler import logger
+
+
+def format_situation_sketch_for_model(
+    sketch: SituationSketch | None,
+    narrative: str | None,
+) -> str:
+    parts: list[str] = []
+    if sketch is not None:
+        parts.append("【结构化局势】\n" + sketch.model_dump_json(indent=2))
+    if narrative and str(narrative).strip():
+        parts.append("【局势笔记】\n" + str(narrative).strip())
+    return "\n\n".join(parts)
+
+
+def _merge_extra_into_system_message(
+    request: ModelRequest, extra_text: str
+) -> ModelRequest:
+    sm = request.system_message
+    try:
+        blocks = list(sm.content_blocks)
+        blocks.append({"type": "text", "text": "\n\n" + extra_text})
+        new_sm = SystemMessage(content=blocks)
+    except (TypeError, AttributeError, ValueError):
+        prev = sm.content
+        if isinstance(prev, str):
+            new_sm = SystemMessage(content=prev + "\n\n" + extra_text)
+        else:
+            new_sm = SystemMessage(content=str(prev) + "\n\n" + extra_text)
+    return request.override(system_message=new_sm)
+
+
+@wrap_model_call
+def situation_sketch_model_context(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse],
+) -> ModelResponse:
+    logger.info(f"[situation sketch model context] 嵌入situation sketch信息到模型: {request.model.name}")
+    ctx = request.runtime.context
+    sk = getattr(ctx, "situation_sketch", None)
+    nar = getattr(ctx, "situation_sketch_narrative", None)
+    sketch_obj = sk if isinstance(sk, SituationSketch) else None
+    narrative_str = nar if isinstance(nar, str) else None
+    blob = format_situation_sketch_for_model(sketch_obj, narrative_str)
+    if not blob.strip():
+        return handler(request)
+    return handler(_merge_extra_into_system_message(request, blob))
+
+
+@wrap_tool_call
+async def monitor_tool(
+    request: ToolCallRequest,
+    handler: Callable[[ToolCallRequest], ToolMessage | Command],
+) -> ToolMessage | Command:
+    """监控工具调用，并记录工具调用日志。"""
+
+    logger.info(f"[tool monitor] 执行工具: {request.tool_call['name']}")
+    logger.info(f"[tool monitor] 工具参数: {request.tool_call['args']}")
+
+    try:
+        result = await handler(request)
+        logger.info(f"[tool monitor] 工具 {request.tool_call['name']} 执行成功")
+        return result
+    except Exception as e:
+        logger.error(f"工具{request.tool_call['name']}调用失败，原因：{str(e)}")
+        raise e
+
+
+@before_agent
+async def before_agent_middleware(state: AgentState, runtime: Runtime) -> None:
+    """在 Agent 执行前记录日志。"""
+    name = getattr(state, "agent_name", None) or getattr(state, "name", "?")
+    logger.info(f"[agent before] 执行 Agent: {name}")
+    return None
+
+
+@dataclass
+class MemoryAgentContext:
+    """MemoryAgent：draft=摘要草案，revise=按判官意见修订。"""
+
+    phase: Literal["draft", "revise"] = "draft"
+    situation_sketch: SituationSketch | None = None
+    situation_sketch_narrative: str | None = None
+
+
+@dataclass
+class DecisionAgentContext:
+    """DecisionAgent：draft=首轮决策，revise=按判官修订三段输出。"""
+
+    phase: Literal["draft", "revise"] = "draft"
+    situation_sketch: SituationSketch | None = None
+    situation_sketch_narrative: str | None = None
+
+
+@dataclass
+class RuleCriticContext:
+    """RuleCriticAgent：memory=记忆判官，decision=决策判官。"""
+
+    phase: Literal["memory", "decision"] = "memory"
+    situation_sketch: SituationSketch | None = None
+    situation_sketch_narrative: str | None = None
+
+
+def _phase_str(ctx: object, attr: str = "phase") -> str | None:
+    if ctx is None:
+        return None
+    if isinstance(ctx, (MemoryAgentContext, DecisionAgentContext, RuleCriticContext)):
+        return ctx.phase
+    p = getattr(ctx, attr, None)
+    return str(p) if p is not None else None
+
+
+def memory_phase_prompt_middleware(draft_system: str, revise_system: str):
+    @dynamic_prompt
+    def _select(request: ModelRequest) -> str:
+        if _phase_str(request.runtime.context) == "revise":
+            logger.info("memory agent 修订阶段")
+            return revise_system
+        logger.info("memory agent 起草阶段")
+        return draft_system
+
+    return _select
+
+
+def decision_phase_prompt_middleware(draft_system: str, revise_system: str):
+    @dynamic_prompt
+    def _select(request: ModelRequest) -> str:
+        if _phase_str(request.runtime.context) == "revise":
+            logger.info("decision agent 修订阶段")
+            return revise_system
+        logger.info("decision agent 起草阶段")
+        return draft_system
+
+    return _select
+
+
+def rule_critic_phase_prompt_middleware(memory_system: str, decision_system: str):
+    @dynamic_prompt
+    def _select(request: ModelRequest) -> str:
+        if _phase_str(request.runtime.context) == "decision":
+            logger.info("决策判官阶段")
+            return decision_system
+        logger.info("记忆判官阶段")
+        return memory_system
+
+    return _select

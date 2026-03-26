@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import queue
@@ -10,13 +11,14 @@ import threading
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from backend import app_state
 from backend.agents.ingestion import IngestionAgent
 from backend.schemas.contract import DecisionOutput, IngestionOutput, iso_now
 from backend.schemas.decision import DecisionContext, PlayerRosterEntry
+from backend.services.situation_sketch import schedule_situation_sketch_after_ingestion
 
 logger = logging.getLogger("ggd-a")
 
@@ -34,6 +36,7 @@ def _forward_ingestion_to_memory(ingestion: IngestionOutput) -> None:
 
     async def _run() -> None:
         await g.ainvoke(ingestion, ingestion.session_id)
+        await schedule_situation_sketch_after_ingestion(g, ingestion.session_id)
 
     fut = asyncio.run_coroutine_threadsafe(_run(), loop)
     try:
@@ -392,11 +395,7 @@ class InferenceRequest(BaseModel):
     speaker_filter: Optional[list[str]] = None
 
 
-@router.post("/api/inference")
-async def api_inference(req: InferenceRequest):
-    """Run decision in-process (same as POST /api/v1/decision)."""
-    from backend.routers.decision import execute_decision
-
+def _build_decision_context_for_inference(req: InferenceRequest) -> DecisionContext:
     extra: dict[str, Any] = {}
     if req.speaker_filter:
         extra["speaker_filter"] = req.speaker_filter
@@ -411,7 +410,7 @@ async def api_inference(req: InferenceRequest):
         for r in controller.roster
     ] if controller.roster else []
 
-    ctx = DecisionContext(
+    return DecisionContext(
         session_id=req.session_id,
         self_player_number=req.self_player_number,
         self_player_id=req.self_player_id,
@@ -422,29 +421,48 @@ async def api_inference(req: InferenceRequest):
         extra=extra,
     )
 
-    try:
-        result = await execute_decision(ctx)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Decision failed: {e}") from e
 
-    output = DecisionOutput(
-        session_id=req.session_id,
-        suggestion_type="speak",
-        content=result.speech_suggestion,
-        structured={
-            "prior_speech_analysis": result.prior_speech_analysis,
-            "identity_inference": result.identity_inference,
-            "rag_queries_used": result.rag_queries_used,
-            "warnings": result.warnings,
-            "debug_prompt": result.debug_prompt or "",
-        },
-        timestamp=iso_now(),
-        trigger="speech",
-    )
-    event_queue.put({"type": "decision", "data": output.model_dump()})
-    return output.model_dump()
+@router.post("/api/inference/stream")
+async def api_inference_stream(req: InferenceRequest):
+    """决策流式：SSE，草稿 + 判官 + 修订阶段 token/工具事件，最后 type=done。"""
+    from backend.routers.decision import execute_decision_stream
+
+    ctx = _build_decision_context_for_inference(req)
+
+    async def _gen():
+        try:
+            async for ev in execute_decision_stream(ctx):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                if ev.get("type") == "done":
+                    result = ev.get("result") or {}
+                    output = DecisionOutput(
+                        session_id=req.session_id,
+                        suggestion_type="speak",
+                        content=result.get("speech_suggestion", ""),
+                        structured={
+                            "prior_speech_analysis": result.get(
+                                "prior_speech_analysis", ""
+                            ),
+                            "identity_inference": result.get(
+                                "identity_inference", ""
+                            ),
+                            "warnings": result.get("warnings", []),
+                            "debug_prompt": result.get("debug_prompt") or "",
+                        },
+                        timestamp=iso_now(),
+                        trigger="speech",
+                    )
+                    event_queue.put(
+                        {"type": "decision", "data": output.model_dump()}
+                    )
+        except HTTPException as he:
+            err = {"type": "error", "detail": he.detail, "status_code": he.status_code}
+            yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            err = {"type": "error", "detail": str(e)}
+            yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @router.websocket("/ws")

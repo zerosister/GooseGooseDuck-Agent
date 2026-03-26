@@ -57,25 +57,14 @@ class PlayerState(BaseModel):
     speaker_id: str
     latest_stance: str = Field(..., description="该玩家最新的立场/观点")
     key_claims: list[str] = Field(default_factory=list, description="该玩家发表过的关键指控")
-    emotion_trend: str = Field(..., description="情绪走向（如：从冷静变为激进）")
 
 
 class MemorySummary(BaseModel):
     session_id: str
     player_summaries: list[PlayerState] = Field(default_factory=list)
-    recent_events: list[str] = Field(default_factory=list, description="最近发生的大事（如：某人被投出）")
     overall_atmosphere: Optional[str] = Field(None, description="当前的整体讨论氛围")
     timestamp: str
-
-
-class MemoryTestState(BaseModel):
-    """测试/调试用：可累积 ingestions。"""
-
-    ingestions: Annotated[list[IngestionOutput], operator.add] = Field(
-        default_factory=list,
-        description="本局所有历史发言记录（短期记忆）",
-    )
-    summary: Optional[MemorySummary] = Field(
+    rule_critic_notes: Optional[str] = Field(
         None,
-        description="基于当前所有 ingestions 生成的最新摘要，为空则表示第一次调用",
+        description="规则校对说明（硬错误/软建议，供审计）",
     )

@@ -1,0 +1,20 @@
+请输出**一个** JSON 对象（仅此）：
+
+Schema：
+{
+  "approved": <布尔>,
+  "issues": <字符串数组>,
+  "correction_instructions": <字符串>,
+  "rule_hits": <字符串数组>,
+  "raw_notes": <字符串或 null>
+}
+
+当前决策输出（待评审）：
+【前序发言分析】
+{prior_speech_analysis}
+
+【玩家身份推测】
+{identity_inference}
+
+【发言建议】
+{speech_suggestion}

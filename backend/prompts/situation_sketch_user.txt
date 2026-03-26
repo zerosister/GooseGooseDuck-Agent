@@ -1,0 +1,7 @@
+记忆摘要 JSON：
+{memory_summary_json}
+
+近期发言摘录（短窗）：
+{recent_ingestions_text}
+
+请直接输出局势笔记正文（纯文本）。
