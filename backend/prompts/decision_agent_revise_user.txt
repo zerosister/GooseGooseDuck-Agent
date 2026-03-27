@@ -1,15 +1,6 @@
 规则判官评审 JSON：
 {critic_review_json}
 
-决策上下文 JSON：
-{decision_context_json}
-
-记忆摘要 JSON：
-{memory_summary_json}
-
-近期发言 JSON：
-{recent_ingestions}
-
 当前待修订的三段输出（请按判官意见改写后重新输出，保留三段标记）：
 
 【前序发言分析】

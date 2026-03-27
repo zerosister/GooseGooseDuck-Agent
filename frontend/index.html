@@ -96,6 +96,20 @@
   .decision-stream-pre { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; font-family: 'Cascadia Code','Consolas',monospace; max-height: 320px; overflow-y: auto; }
   .decision-stream-hint { font-size: 11px; color: #64748b; margin-bottom: 8px; }
 
+  .sketch-panel .config-grid { margin-bottom: 10px; }
+  .sketch-section { margin-bottom: 14px; font-size: 12px; }
+  .sketch-section h4 { font-size: 12px; color: #a78bfa; margin-bottom: 6px; font-weight: 600; }
+  .sketch-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .sketch-table th, .sketch-table td { border: 1px solid #334155; padding: 4px 6px; text-align: left; }
+  .sketch-table input, .sketch-table select { width: 100%; padding: 4px; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; font-size: 11px; }
+  .sk-round { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .sk-round textarea { width: 100%; min-height: 48px; padding: 6px; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; font-size: 12px; }
+  #skGuessHost { font-size: 12px; }
+  .sk-guess-seat-block { border: 1px solid #334155; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #0f172a; }
+  .sk-guess-pair { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+  .sk-guess-pair select { padding: 4px; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; font-size: 11px; }
+  .inference-hint { font-size: 11px; color: #64748b; line-height: 1.5; margin-top: 8px; max-width: 520px; }
+
   .debug-toggle { cursor: pointer; user-select: none; color: #94a3b8; font-size: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 6px; }
   .debug-toggle:hover { color: #e2e8f0; }
   .debug-toggle::before { content: '▶'; font-size: 9px; transition: transform 0.15s; display: inline-block; }
@@ -124,6 +138,8 @@
   <h1>鹅鸭杀助手</h1>
   <div class="header-right">
     <div>状态: <span id="statusText">未连接</span></div>
+    <div>本局ID: <span id="hdrGameId" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom;">—</span></div>
+    <div>会议ID: <span id="hdrMeetingId" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom;">—</span></div>
     <div>窗口: <span id="windowTitle">未选择</span></div>
     <div>当前发言: <span id="currentSpeaker">--</span></div>
   </div>
@@ -131,9 +147,10 @@
 
 <div class="container">
   <div class="controls">
+    <button class="btn-purple" id="btnNewGame" onclick="startNewGame()">开始新一局</button>
     <button class="btn-primary" id="btnSelect" onclick="selectWindow()">选择窗口</button>
-    <button class="btn-success" id="btnStart" onclick="startMonitor()">开始监控</button>
-    <button class="btn-danger" id="btnStop" onclick="stopMonitor()" disabled>停止监控</button>
+    <button class="btn-success" id="btnStart" onclick="startMonitor()" disabled>开始监控新一轮会议</button>
+    <button class="btn-danger" id="btnStop" onclick="stopMonitor()" disabled>结束本轮会议</button>
     <button class="btn-outline" onclick="takeScreenshot()">截图预览</button>
     <button class="btn-outline" onclick="scanRoster()">识别名单</button>
     <button class="btn-outline btn-sm" onclick="clearLog()">清空日志</button>
@@ -173,7 +190,48 @@
         <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
       </div>
       <div class="panel-body" id="recordList">
-        <div class="empty">等待监控启动...</div>
+        <div class="empty">请先「开始新一局」，再启动监控...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Situation sketch (checkpoint) -->
+  <div class="panel sketch-panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      局势编辑（checkpoint）
+      <span class="badge" id="sketchStatusHint">未加载</span>
+    </div>
+    <div class="panel-body" style="padding:14px;max-height:520px;overflow-y:auto;">
+      <div class="controls" style="margin-bottom:12px;">
+        <button class="btn-outline btn-sm" type="button" onclick="loadSituationSketch()">从服务器加载</button>
+        <button class="btn-success btn-sm" type="button" onclick="saveSituationSketch()">保存局势</button>
+        <button class="btn-outline btn-sm" type="button" onclick="syncRosterToSketch()">左侧名单同步到局势表</button>
+        <span style="font-size:11px;color:#64748b;">「开始新一局」后即有 checkpoint；扫名单会合并并默认座位颜色</span>
+      </div>
+      <div class="sketch-section">
+        <h4>游戏设置</h4>
+        <div class="config-grid">
+          <div class="config-field"><label>鹅数量</label><input type="number" id="skGoose" min="0" value="0"></div>
+          <div class="config-field"><label>鸭数量</label><input type="number" id="skDuck" min="0" value="0"></div>
+          <div class="config-field"><label>中立数量</label><input type="number" id="skNeutral" min="0" value="0"></div>
+          <div class="config-field"><label>我的角色</label><input type="text" id="skMyRole" value="未知"></div>
+          <div class="config-field" style="grid-column:1/-1;"><label>已知角色（逗号分隔）</label><input type="text" id="skKnownRoles" placeholder="通灵, 警长"></div>
+        </div>
+      </div>
+      <div class="sketch-section">
+        <h4>玩家名单（与识别名单合并后可在此微调）</h4>
+        <p style="font-size:11px;color:#64748b;margin:-4px 0 8px 0;">「存活/出局」由下方<strong>淘汰记录</strong>自动计算，不可在此手动改状态。</p>
+        <div id="skRosterRows"></div>
+        <button class="btn-outline btn-sm" type="button" onclick="sketchAddRosterRow()">添加一行</button>
+      </div>
+      <div class="sketch-section">
+        <h4>会议轮次与淘汰</h4>
+        <p style="font-size:11px;color:#64748b;margin:-4px 0 8px 0;">会议轮次<strong>仅随「开始监控新一轮会议」</strong>增加，代表本局内已进行的各次会议（<code>meeting_id</code> 与监控「会议 ID」一致）；可在每轮内编辑淘汰、投票与简述，不可在此手建空轮次。</p>
+        <div id="skMeetingRounds"></div>
+      </div>
+      <div class="sketch-section">
+        <h4>猜身份（按座位，阵营 + 角色）</h4>
+        <div id="skGuessHost"></div>
       </div>
     </div>
   </div>
@@ -190,11 +248,12 @@
           </div>
           <div class="config-field">
             <label>玩家 ID</label>
-            <input type="text" id="cfgPlayerId" value="哈吉贵">
+            <input type="text" id="cfgPlayerId" value="" placeholder="填写本局昵称（缺省为「玩家」）">
           </div>
           <div class="config-field">
             <label>角色名</label>
-            <input type="text" id="cfgRoleName" value="通灵">
+            <input type="text" id="cfgRoleName" value="" placeholder="从列表选或填写" list="cfgRoleNameList">
+            <datalist id="cfgRoleNameList"></datalist>
           </div>
           <div class="config-field">
             <label>阵营</label>
@@ -215,6 +274,7 @@
     </div>
     <div class="inference-action">
       <button class="btn-purple" id="btnInference" onclick="runInference()" style="padding:16px 32px;font-size:16px;">开始推理</button>
+      <p class="inference-hint">推理依赖<strong>记忆摘要</strong>：须先在本局监控中至少有一条 ASR 读入成功（摘要随发言在后台更新）；本按钮<strong>不会</strong>单独触发记忆 Agent。请确认「开始推理」使用的本局 session 与当前一致。</p>
     </div>
   </div>
 
@@ -251,9 +311,459 @@ const API = '';
 let ws = null;
 let records = [];
 let logs = [];
-let currentSessionId = null;
+let gameSessionId = null;
+let meetingId = null;
 let roster = [];
 let activeFilter = 'all';
+let sketchState = null;
+let gameCatalog = { seat_colors: [], role_names: [] };
+
+async function loadGameCatalog() {
+  try {
+    const res = await fetch(`${API}/api/v1/game-catalog`);
+    if (res.ok) {
+      gameCatalog = await res.json();
+      const dl = document.getElementById('cfgRoleNameList');
+      if (dl && gameCatalog.role_names) {
+        dl.innerHTML = gameCatalog.role_names.map(r => `<option value="${escHtml(r)}">`).join('');
+      }
+    }
+  } catch (e) { console.warn('game-catalog', e); }
+}
+
+function colorForSeat(seat) {
+  const cols = gameCatalog.seat_colors || [];
+  if (!cols.length) return '';
+  if (seat < 1) return cols[0];
+  const i = seat - 1;
+  return cols[Math.min(i, cols.length - 1)];
+}
+
+function colorSelectOptions(selected) {
+  const cols = gameCatalog.seat_colors || [];
+  let html = cols.map(c => `<option value="${escHtml(c)}" ${c === selected ? 'selected' : ''}>${escHtml(c)}</option>`).join('');
+  if (selected && !cols.includes(selected)) {
+    html += `<option value="${escHtml(selected)}" selected>${escHtml(selected)}</option>`;
+  }
+  return html;
+}
+
+function normalizeGuessingRoles(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw)) {
+    const seat = parseInt(k, 10);
+    if (!seat || seat < 1) continue;
+    if (!Array.isArray(v)) continue;
+    out[seat] = v.map(pair => {
+      if (Array.isArray(pair) && pair.length >= 2) return [String(pair[0]), String(pair[1])];
+      return ['未知', '未知'];
+    });
+  }
+  return out;
+}
+
+const SKETCH_CAUSES = ['投票', '刺客会议狙击', '会议外淘汰', '小丑气球爆炸', '其他'];
+function causePresetOccurredAt(cause) {
+  const m = {
+    '投票': '本轮会议结束',
+    '刺客会议狙击': '',
+    '会议外淘汰': '本轮会议前',
+    '小丑气球爆炸': '本轮投票开始时',
+    '其他': '略'
+  };
+  return m[cause] !== undefined ? m[cause] : '略';
+}
+
+function defaultSketch() {
+  return {
+    game_settings: { goose_count: 0, duck_count: 0, neutral_count: 0, known_roles: [], my_role: '未知' },
+    player_roster: [],
+    meeting_rounds: [],
+    guessing_roles: {}
+  };
+}
+
+/** 兼容旧数据：仅含 round_id 的轮次补全 meeting_id。 */
+function normalizeMeetingRoundsForSketch(s) {
+  if (!s?.meeting_rounds) return;
+  for (const r of s.meeting_rounds) {
+    if (!r.meeting_id && r.round_id) r.meeting_id = r.round_id;
+  }
+}
+
+/** 根据全部会议轮次中的淘汰记录，更新 player_roster 的存活/出局（唯一来源）。 */
+function syncRosterStatusFromEliminations(state) {
+  if (!state?.player_roster?.length) return;
+  const outSeats = new Set();
+  for (const round of state.meeting_rounds || []) {
+    for (const el of round.eliminations || []) {
+      const v = el.victim_seat_number;
+      if (typeof v === 'number' && v >= 1 && v <= 16) outSeats.add(v);
+    }
+  }
+  for (const entry of state.player_roster) {
+    const seat = entry.seat_number;
+    entry.status = outSeats.has(seat) ? '出局' : '存活';
+  }
+}
+
+/** 将局势中的会议轮次与当前监控返回的 meetingId（后端本轮会议 ID）对齐：缺则追加一条。 */
+function syncMeetingRoundWithMonitoringId() {
+  if (!meetingId) return;
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.meeting_rounds = sketchState.meeting_rounds || [];
+  if (sketchState.meeting_rounds.some(r => (r.meeting_id || r.round_id) === meetingId)) {
+    sketchRenderAll();
+    return;
+  }
+  sketchState.meeting_rounds.push({
+    meeting_id: meetingId,
+    eliminations: [],
+    votes: [],
+    my_view: ''
+  });
+  sketchRenderAll();
+  addLog('已同步本轮会议轮次（meeting_id 与会议 ID 一致），可点「保存局势」写入 checkpoint', 'info');
+}
+
+function renderSketchRoster() {
+  const s = sketchState || defaultSketch();
+  const rows = s.player_roster || [];
+  const host = document.getElementById('skRosterRows');
+  if (!rows.length) {
+    host.innerHTML = '<p style="font-size:11px;color:#64748b;">暂无，可添加行或「识别名单」合并进 checkpoint</p>';
+    return;
+  }
+  host.innerHTML = `<table class="sketch-table"><thead><tr><th>座位</th><th>玩家ID</th><th>颜色</th><th>状态</th><th></th></tr></thead><tbody>` +
+    rows.map((r, i) => `
+      <tr data-sk="roster" data-i="${i}">
+        <td><input type="number" min="1" max="16" class="sk-r-seat" value="${r.seat_number ?? ''}"></td>
+        <td><input type="text" class="sk-r-name" value="${escHtml(r.player_id || '')}"></td>
+        <td><select class="sk-r-color">${colorSelectOptions(r.color || '')}</select></td>
+        <td class="sk-r-status-readonly" style="color:${r.status === '出局' ? '#f87171' : '#94a3b8'};">${r.status === '出局' ? '出局' : '存活'}</td>
+        <td><button type="button" class="btn-outline btn-sm" onclick="sketchRemoveRosterRow(${i})">删</button></td>
+      </tr>`).join('') + '</tbody></table>';
+}
+
+function renderSketchRounds() {
+  const s = sketchState || defaultSketch();
+  const rounds = s.meeting_rounds || [];
+  const host = document.getElementById('skMeetingRounds');
+  if (!rounds.length) {
+    host.innerHTML = '<p style="font-size:11px;color:#64748b;">暂无会议轮次。请先「开始监控新一轮会议」，系统会按会议 ID 追加；本局内多场会议会依次出现在此列表。</p>';
+    return;
+  }
+  host.innerHTML = rounds.map((round, ri) => {
+    const mid = round.meeting_id || round.round_id || ('legacy_' + (ri + 1));
+    const elims = round.eliminations || [];
+    const elimRows = elims.map((el, ei) => `
+      <tr data-sk="elim" data-ri="${ri}" data-ei="${ei}">
+        <td><input type="number" min="1" max="16" class="sk-victim" value="${el.victim_seat_number ?? ''}"></td>
+        <td><select class="sk-el-cause" onchange="sketchOnCauseChange(${ri}, ${ei})">
+          ${SKETCH_CAUSES.map(c => `<option value="${c}" ${el.cause === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}
+        </select></td>
+        <td><input type="text" class="sk-occurred" value="${escHtml(el.occurred_at || '')}" placeholder="时间/阶段说明"></td>
+        <td><button type="button" class="btn-outline btn-sm" onclick="sketchRemoveElim(${ri}, ${ei})">删</button></td>
+      </tr>`).join('');
+    return `<div class="sk-round" data-round="${ri}">
+      <div class="config-field" style="margin-bottom:8px;"><label>会议 ID（<code>meeting_id</code>，与监控一致）</label><input type="text" class="sk-meeting-id" readonly value="${escHtml(mid)}"></div>
+      <div class="config-field" style="margin-bottom:8px;"><label>我视角简述</label><textarea class="sk-round-view">${escHtml(round.my_view || '')}</textarea></div>
+      <p style="font-size:11px;color:#94a3b8;margin:6px 0;">淘汰记录（原因与时间联动）</p>
+      <table class="sketch-table"><thead><tr><th>出局座位</th><th>原因</th><th>发生时间</th><th></th></tr></thead><tbody>${elimRows || '<tr><td colspan="4">无</td></tr>'}</tbody></table>
+      <button type="button" class="btn-outline btn-sm" style="margin-top:6px;" onclick="sketchAddElim(${ri})">添加淘汰</button>
+      <div class="config-field" style="margin-top:8px;"><label>投票 JSON</label><textarea class="sk-round-votes" style="min-height:40px;">${escHtml(JSON.stringify(round.votes || []))}</textarea></div>
+    </div>`;
+  }).join('');
+}
+
+function sketchRenderAll() {
+  const s = sketchState || defaultSketch();
+  document.getElementById('skGoose').value = s.game_settings.goose_count ?? 0;
+  document.getElementById('skDuck').value = s.game_settings.duck_count ?? 0;
+  document.getElementById('skNeutral').value = s.game_settings.neutral_count ?? 0;
+  document.getElementById('skMyRole').value = s.game_settings.my_role ?? '未知';
+  document.getElementById('skKnownRoles').value = (s.game_settings.known_roles || []).join(', ');
+  s.guessing_roles = normalizeGuessingRoles(s.guessing_roles || {});
+  syncRosterStatusFromEliminations(s);
+  renderSketchRoster();
+  renderSketchRounds();
+  renderGuessRolesPanel();
+}
+
+async function loadSituationSketch() {
+  if (!gameSessionId) {
+    addLog('请先「开始新一局」以绑定本局 session', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/api/v1/status?session_id=${encodeURIComponent(gameSessionId)}`);
+    const data = await res.json();
+    sketchState = data.situation_sketch
+      ? JSON.parse(JSON.stringify(data.situation_sketch))
+      : defaultSketch();
+    if (!sketchState.game_settings) sketchState.game_settings = defaultSketch().game_settings;
+    sketchState.player_roster = sketchState.player_roster || [];
+    sketchState.meeting_rounds = sketchState.meeting_rounds || [];
+    sketchState.guessing_roles = sketchState.guessing_roles || {};
+    normalizeMeetingRoundsForSketch(sketchState);
+    sketchRenderAll();
+    let hint = data.sketch_updated_at ? '已加载' : '已加载(默认)';
+    if (data.has_summary === true) hint += ' · 记忆摘要就绪';
+    else if (data.ingestion_count > 0) hint += ' · 已读入' + data.ingestion_count + '条';
+    else hint += ' · 等待发言以生成摘要';
+    document.getElementById('sketchStatusHint').textContent = hint;
+    addLog('局势已从服务器加载', 'info');
+    syncMeetingRoundWithMonitoringId();
+  } catch (e) {
+    addLog('加载局势失败: ' + e.message, 'error');
+  }
+}
+
+function collectSituationSketchFromDom() {
+  const gs = {
+    goose_count: parseInt(document.getElementById('skGoose').value, 10) || 0,
+    duck_count: parseInt(document.getElementById('skDuck').value, 10) || 0,
+    neutral_count: parseInt(document.getElementById('skNeutral').value, 10) || 0,
+    known_roles: document.getElementById('skKnownRoles').value.split(/[,，]/).map(x => x.trim()).filter(Boolean),
+    my_role: document.getElementById('skMyRole').value || '未知'
+  };
+  const roster = [];
+  document.querySelectorAll('#skRosterRows tr[data-sk=roster]').forEach(tr => {
+    const seat = parseInt(tr.querySelector('.sk-r-seat')?.value, 10);
+    if (!seat || seat < 1) return;
+    roster.push({
+      seat_number: seat,
+      player_id: tr.querySelector('.sk-r-name')?.value || String(seat),
+      color: tr.querySelector('.sk-r-color')?.value || '',
+      status: '存活'
+    });
+  });
+  // 无表格行时 renderSketchRoster 只渲染「暂无」占位，没有 tr；若内存里仍有名单则沿用，避免保存把 checkpoint 名单写成空
+  let player_roster = roster;
+  if (!player_roster.length && sketchState?.player_roster?.length) {
+    player_roster = sketchState.player_roster.map(e => ({
+      seat_number: e.seat_number,
+      player_id: (e.player_id != null && String(e.player_id)) || String(e.seat_number),
+      color: e.color || '',
+      status: e.status === '出局' ? '出局' : '存活'
+    }));
+  }
+  const meeting_rounds = [];
+  document.querySelectorAll('.sk-round').forEach(div => {
+    const rid = div.querySelector('.sk-meeting-id')?.value || div.querySelector('.sk-round-id')?.value || 'r';
+    const my_view = div.querySelector('.sk-round-view')?.value || '';
+    const elims = [];
+    div.querySelectorAll('tr[data-sk=elim]').forEach(tr => {
+      const v = parseInt(tr.querySelector('.sk-victim')?.value, 10);
+      if (!v || v < 1) return;
+      elims.push({
+        victim_seat_number: v,
+        cause: tr.querySelector('.sk-el-cause')?.value || '其他',
+        occurred_at: tr.querySelector('.sk-occurred')?.value || '略'
+      });
+    });
+    let votes = [];
+    try {
+      votes = JSON.parse(div.querySelector('.sk-round-votes')?.value || '[]');
+      if (!Array.isArray(votes)) votes = [];
+    } catch { votes = []; }
+    meeting_rounds.push({ meeting_id: rid, eliminations: elims, votes, my_view });
+  });
+  const guessing_roles = collectGuessRolesFromDom();
+  const out = {
+    game_settings: gs,
+    player_roster,
+    meeting_rounds,
+    guessing_roles
+  };
+  syncRosterStatusFromEliminations(out);
+  return out;
+}
+
+async function saveSituationSketch() {
+  if (!gameSessionId) {
+    addLog('请先「开始新一局」', 'error');
+    return;
+  }
+  let situation_sketch;
+  try {
+    situation_sketch = collectSituationSketchFromDom();
+  } catch (e) {
+    addLog('收集表单失败: ' + e.message, 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/api/v1/situation-sketch`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: gameSessionId, situation_sketch })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail || err));
+    }
+    const out = await res.json();
+    document.getElementById('sketchStatusHint').textContent = '已保存';
+    addLog('局势已保存 ' + (out.sketch_updated_at || ''), 'info');
+  } catch (e) {
+    addLog('保存局势失败: ' + e.message, 'error');
+  }
+}
+
+function sketchAddRosterRow() {
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.player_roster = sketchState.player_roster || [];
+  const n = sketchState.player_roster.length + 1;
+  const seat = n > 16 ? 16 : n;
+  sketchState.player_roster.push({ seat_number: seat, player_id: '', color: colorForSeat(seat), status: '存活' });
+  syncRosterStatusFromEliminations(sketchState);
+  renderSketchRoster();
+}
+function sketchRemoveRosterRow(i) {
+  if (!sketchState?.player_roster) return;
+  sketchState.player_roster.splice(i, 1);
+  syncRosterStatusFromEliminations(sketchState);
+  renderSketchRoster();
+}
+function sketchAddElim(ri) {
+  if (!sketchState?.meeting_rounds?.[ri]) return;
+  sketchState.meeting_rounds[ri].eliminations = sketchState.meeting_rounds[ri].eliminations || [];
+  sketchState.meeting_rounds[ri].eliminations.push({
+    victim_seat_number: 1,
+    cause: '其他',
+    occurred_at: '略'
+  });
+  syncRosterStatusFromEliminations(sketchState);
+  renderSketchRoster();
+  renderSketchRounds();
+}
+function sketchRemoveElim(ri, ei) {
+  if (!sketchState?.meeting_rounds?.[ri]?.eliminations) return;
+  sketchState.meeting_rounds[ri].eliminations.splice(ei, 1);
+  syncRosterStatusFromEliminations(sketchState);
+  renderSketchRoster();
+  renderSketchRounds();
+}
+function sketchOnCauseChange(ri, ei) {
+  const host = document.getElementById('skMeetingRounds');
+  const div = host?.querySelector(`.sk-round[data-round="${ri}"]`);
+  if (!div) return;
+  const tr = div.querySelector(`tr[data-sk=elim][data-ri="${ri}"][data-ei="${ei}"]`);
+  if (!tr) return;
+  const cause = tr.querySelector('.sk-el-cause')?.value || '其他';
+  const occ = tr.querySelector('.sk-occurred');
+  if (occ) occ.value = causePresetOccurredAt(cause);
+}
+
+function renderGuessRolesPanel() {
+  const host = document.getElementById('skGuessHost');
+  if (!host) return;
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.guessing_roles = normalizeGuessingRoles(sketchState.guessing_roles || {});
+  const gr = sketchState.guessing_roles;
+  const seats = Object.keys(gr).map(Number).filter(n => n > 0).sort((a, b) => a - b);
+  const roles = gameCatalog.role_names || [];
+  const factions = ['鹅', '鸭', '中立', '未知'];
+  let html = '<p style="font-size:11px;color:#64748b;margin-bottom:8px;">按座位添加可能身份；角色名来自 <code>meeting_game_context</code> 角色目录。</p>';
+  html += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">';
+  html += '<span style="font-size:11px;color:#94a3b8;">新座位</span><select id="skGuessNewSeat" style="padding:4px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;font-size:12px;">';
+  for (let s = 1; s <= 16; s++) html += `<option value="${s}">${s}</option>`;
+  html += '</select><button type="button" class="btn-outline btn-sm" onclick="sketchAddGuessSeatFromSelect()">添加座位</button></div>';
+  for (const seat of seats) {
+    const pairs = gr[seat] || [];
+    html += `<div class="sk-guess-seat-block" data-seat="${seat}">`;
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><strong>座位 ${seat}</strong><button type="button" class="btn-outline btn-sm" onclick="sketchRemoveGuessSeat(${seat})">移除该座位</button></div>`;
+    pairs.forEach((pair, idx) => {
+      const fa = pair[0] || '未知';
+      const ro = pair[1] || '';
+      let roleOpts = roles.map(r => `<option value="${escHtml(r)}" ${r === ro ? 'selected' : ''}>${escHtml(r)}</option>`).join('');
+      if (ro && !roles.includes(ro)) {
+        roleOpts += `<option value="${escHtml(ro)}" selected>${escHtml(ro)}</option>`;
+      }
+      html += `<div class="sk-guess-pair" data-pi="${idx}">`;
+      html += `<select class="sk-guess-faction">${factions.map(f => `<option value="${f}" ${f === fa ? 'selected' : ''}>${f}</option>`).join('')}</select>`;
+      html += `<select class="sk-guess-role" style="flex:1;min-width:120px;">${roleOpts}</select>`;
+      html += `<button type="button" class="btn-outline btn-sm" onclick="sketchGuessRemovePair(${seat},${idx})">删</button></div>`;
+    });
+    html += `<button type="button" class="btn-outline btn-sm" style="margin-top:4px;" onclick="sketchGuessAddPair(${seat})">+ 一条猜测</button></div>`;
+  }
+  if (!seats.length) html += '<p style="font-size:11px;color:#64748b;">暂无，请选座位号后点「添加座位」</p>';
+  host.innerHTML = html;
+}
+
+function collectGuessRolesFromDom() {
+  const out = {};
+  document.querySelectorAll('#skGuessHost .sk-guess-seat-block').forEach(block => {
+    const seat = parseInt(block.dataset.seat, 10);
+    if (!seat) return;
+    const pairs = [];
+    block.querySelectorAll('.sk-guess-pair').forEach(row => {
+      const fac = row.querySelector('.sk-guess-faction')?.value;
+      const role = row.querySelector('.sk-guess-role')?.value;
+      if (fac && role) pairs.push([fac, role]);
+    });
+    if (pairs.length) out[seat] = pairs;
+  });
+  return out;
+}
+
+function sketchAddGuessSeatFromSelect() {
+  const sel = document.getElementById('skGuessNewSeat');
+  const seat = parseInt(sel?.value, 10);
+  if (!seat || seat < 1 || seat > 16) return;
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.guessing_roles = normalizeGuessingRoles(sketchState.guessing_roles || {});
+  const roles = gameCatalog.role_names || [];
+  const first = roles[0] || '未知';
+  if (!sketchState.guessing_roles[seat]) sketchState.guessing_roles[seat] = [['鹅', first]];
+  renderGuessRolesPanel();
+}
+
+function sketchGuessAddPair(seat) {
+  const roles = gameCatalog.role_names || [];
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.guessing_roles = normalizeGuessingRoles(sketchState.guessing_roles || {});
+  const g = sketchState.guessing_roles[seat] || [];
+  g.push(['鹅', roles[0] || '未知']);
+  sketchState.guessing_roles[seat] = g;
+  renderGuessRolesPanel();
+}
+
+function sketchGuessRemovePair(seat, idx) {
+  if (!sketchState?.guessing_roles?.[seat]) return;
+  sketchState.guessing_roles[seat].splice(idx, 1);
+  if (!sketchState.guessing_roles[seat].length) delete sketchState.guessing_roles[seat];
+  renderGuessRolesPanel();
+}
+
+function sketchRemoveGuessSeat(seat) {
+  if (!sketchState?.guessing_roles) return;
+  delete sketchState.guessing_roles[seat];
+  renderGuessRolesPanel();
+}
+
+function syncRosterToSketch() {
+  if (!roster.length) {
+    addLog('左侧名单为空，请先识别名单', 'error');
+    return;
+  }
+  if (!sketchState) sketchState = defaultSketch();
+  sketchState.player_roster = roster.map(r => {
+    const num = Number(r.number) || 0;
+    return {
+      seat_number: num,
+      player_id: (r.name && String(r.name).trim()) || String(num),
+      color: colorForSeat(num),
+      status: '存活'
+    };
+  }).filter(x => x.seat_number >= 1);
+  syncRosterStatusFromEliminations(sketchState);
+  renderSketchRoster();
+  renderGuessRolesPanel();
+  document.getElementById('sketchStatusHint').textContent = '已同步左侧名单（未保存）';
+  addLog('已将左侧名单同步到局势表，请点保存局势', 'info');
+}
 
 // ── Utilities ──
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -290,12 +800,14 @@ function getSelectedSpeakers() {
 async function scanRoster() {
   addLog('正在识别玩家名单...', 'info');
   try {
-    const res = await fetch(`${API}/api/scan-roster`, {method:'POST'});
+    const q = gameSessionId ? `?session_id=${encodeURIComponent(gameSessionId)}` : '';
+    const res = await fetch(`${API}/api/scan-roster${q}`, {method:'POST'});
     const data = await res.json();
     if (data.roster && data.roster.length) {
       roster = data.roster;
       renderRoster();
       addLog(`识别到 ${roster.length} 名玩家`, 'info');
+      if (gameSessionId) await loadSituationSketch();
     } else {
       addLog('未识别到玩家，请确保游戏处于角色/投票界面', 'error');
     }
@@ -327,7 +839,7 @@ function renderRecords() {
   const filtered = activeFilter === 'all' ? records : records.filter(r => r.speaker === activeFilter);
   document.getElementById('recordCount').textContent = filtered.length;
   if (!filtered.length) {
-    el.innerHTML = '<div class="empty">' + (records.length ? '该玩家暂无发言' : '等待监控启动...') + '</div>';
+    el.innerHTML = '<div class="empty">' + (records.length ? '该玩家暂无发言' : '暂无发言（需先新局并启动监控）') + '</div>';
     return;
   }
   el.innerHTML = filtered.slice().reverse().map(r => {
@@ -356,22 +868,37 @@ function toggleLog() {
 }
 
 // ── Status ──
+function syncSessionLabels() {
+  const g = document.getElementById('hdrGameId');
+  const m = document.getElementById('hdrMeetingId');
+  if (g) g.textContent = gameSessionId || '—';
+  if (m) m.textContent = meetingId || '—';
+}
+
 function updateStatus(data) {
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
+  if (!data.is_running) {
+    meetingId = null;
+  } else if (data.meeting_id) {
+    meetingId = data.meeting_id;
+  }
   if (data.is_running) {
     dot.className = 'dot running'; text.textContent = '运行中';
     document.getElementById('btnStart').disabled = true;
     document.getElementById('btnStop').disabled = false;
     document.getElementById('btnSelect').disabled = true;
+    document.getElementById('btnNewGame').disabled = true;
   } else {
     dot.className = 'dot'; text.textContent = '已就绪';
-    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStart').disabled = !gameSessionId;
     document.getElementById('btnStop').disabled = true;
     document.getElementById('btnSelect').disabled = false;
+    document.getElementById('btnNewGame').disabled = false;
   }
   document.getElementById('windowTitle').textContent = data.window_title || '未选择';
   document.getElementById('currentSpeaker').textContent = data.current_speaker ? `${data.current_speaker}号` : '--';
+  syncSessionLabels();
 }
 
 // ── WebSocket ──
@@ -432,21 +959,76 @@ async function selectWindow() {
   } catch(e) { addLog(`选择窗口失败: ${e.message}`, 'error'); }
   document.getElementById('btnSelect').disabled = false;
 }
+
+async function startNewGame() {
+  addLog('正在开始新一局...', 'info');
+  try {
+    const body = {};
+    if (gameSessionId) body.previous_session_id = gameSessionId;
+    const res = await fetch(`${API}/api/new-game`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const err = data.detail;
+      throw new Error(typeof err === 'string' ? err : JSON.stringify(err || data));
+    }
+    if (data.status === 'success' && data.session_id) {
+      gameSessionId = data.session_id;
+      meetingId = null;
+      records = [];
+      roster = [];
+      renderRoster();
+      activeFilter = 'all';
+      renderRecords();
+      sketchState = defaultSketch();
+      sketchRenderAll();
+      document.getElementById('sketchStatusHint').textContent = '未加载';
+      document.getElementById('decisionArea').innerHTML = '<div class="decision-empty">点击「开始推理」获取大模型分析与建议</div>';
+      document.getElementById('decisionTime').textContent = '--';
+      addLog(`已开新局: ${gameSessionId}` + (body.previous_session_id ? '（已删除上一局 checkpoint）' : ''), 'info');
+      syncSessionLabels();
+      fetchStatus();
+    } else {
+      addLog('开始新一局失败: ' + JSON.stringify(data), 'error');
+    }
+  } catch (e) {
+    addLog('开始新一局失败: ' + e.message, 'error');
+  }
+}
+
 async function startMonitor() {
+  if (!gameSessionId) {
+    addLog('请先点击「开始新一局」', 'error');
+    return;
+  }
   addLog('正在启动监控...', 'info');
   document.getElementById('btnStart').disabled = true;
   try {
-    currentSessionId = `session_${Date.now()}`;
-    const res = await fetch(`${API}/api/start`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: currentSessionId})});
+    const res = await fetch(`${API}/api/start`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: gameSessionId})});
     const data = await res.json();
-    if (data.status === 'success') { addLog(`监控已启动 (session: ${currentSessionId})`, 'info'); }
+    if (data.status === 'success') {
+      meetingId = data.meeting_id || null;
+      syncSessionLabels();
+      addLog(`监控已启动 · 本局 ${gameSessionId} · 会议 ${meetingId || '?'}`, 'info');
+      await loadGameCatalog();
+      await new Promise(r => setTimeout(r, 400));
+      await loadSituationSketch();
+    }
     else { addLog(`启动失败: ${data.message||JSON.stringify(data)}`, 'error'); document.getElementById('btnStart').disabled = false; }
     fetchStatus();
   } catch(e) { addLog(`启动失败: ${e.message}`, 'error'); document.getElementById('btnStart').disabled = false; }
 }
 async function stopMonitor() {
-  try { await fetch(`${API}/api/stop`, {method:'POST'}); addLog('监控已停止', 'info'); fetchStatus(); }
-  catch(e) { addLog(`停止失败: ${e.message}`, 'error'); }
+  try {
+    await fetch(`${API}/api/stop`, {method:'POST'});
+    meetingId = null;
+    syncSessionLabels();
+    addLog('本轮会议监控已结束', 'info');
+    fetchStatus();
+  } catch(e) { addLog(`停止失败: ${e.message}`, 'error'); }
 }
 function clearLog() { logs = []; renderLogs(); }
 
@@ -471,11 +1053,20 @@ async function takeScreenshot() {
 async function runInference() {
   const btn = document.getElementById('btnInference');
   const area = document.getElementById('decisionArea');
-  if (!currentSessionId) {
-    area.innerHTML = '<div class="decision-error">请先「开始监控」并等待收集发言后再推理</div>';
-    addLog('推理失败: 尚未启动监控', 'error');
+  if (!gameSessionId) {
+    area.innerHTML = '<div class="decision-error">请先「开始新一局」并「开始监控新一轮会议」，等待收集发言后再推理</div>';
+    addLog('推理失败: 尚未绑定本局 session', 'error');
     return;
   }
+  try {
+    const stRes = await fetch(`${API}/api/v1/status?session_id=${encodeURIComponent(gameSessionId)}`);
+    const st = await stRes.json();
+    if (st.has_summary === false) {
+      area.innerHTML = '<div class="decision-error">尚无记忆摘要：请在本局监控中至少产生一条已入库的发言（ASR 读入成功后后台会更新摘要），并确认推理使用的本局 session 与当前一致。「开始推理」不会单独触发记忆 Agent。</div>';
+      addLog('推理中止：无记忆摘要', 'error');
+      return;
+    }
+  } catch (e) { /* 仍尝试推理 */ }
   btn.disabled = true; btn.classList.add('loading'); btn.textContent = '推理中...';
   document.getElementById('decisionTime').textContent = '…';
   area.innerHTML = `<div class="decision-block">
@@ -501,10 +1092,10 @@ async function runInference() {
   }
 
   const payload = {
-    session_id: currentSessionId,
+    session_id: gameSessionId,
     self_player_number: parseInt(document.getElementById('cfgSeatNum').value) || 3,
-    self_player_id: document.getElementById('cfgPlayerId').value || 'player_1',
-    role_name: document.getElementById('cfgRoleName').value || '通灵',
+    self_player_id: document.getElementById('cfgPlayerId').value.trim() || '玩家',
+    role_name: document.getElementById('cfgRoleName').value.trim() || '未知',
     alignment: document.getElementById('cfgAlignment').value || 'goose',
     speaker_filter: speakerFilter,
   };
@@ -681,6 +1272,8 @@ async function fetchModelBackend() {
 }
 
 // ── Init ──
+syncSessionLabels();
+loadGameCatalog();
 fetchStatus();
 connectWS();
 fetchModelBackend();

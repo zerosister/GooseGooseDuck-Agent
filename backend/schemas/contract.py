@@ -19,7 +19,14 @@ class IngestionOutput(BaseModel):
     content: str = Field(..., description="转写文本 或 图像描述")
     metadata: dict[str, Any] = Field(default_factory=dict, description="扩展信息")
     timestamp: str = Field(..., description="ISO 8601 时间戳")
-    session_id: str = Field(..., description="会议/会话 ID，用于关联同一场会议")
+    session_id: str = Field(
+        ...,
+        description="本局游戏 ID，与 LangGraph checkpoint 的 thread_id 一致，整局共用",
+    )
+    meeting_id: Optional[str] = Field(
+        None,
+        description="本轮会议 ID（一次「开始监控→结束监控」周期），用于区分同一局内多场会议",
+    )
     sequence_id: Optional[int] = Field(None, description="同 session 内顺序号，便于 B 排序")
 
     model_config = {
@@ -35,7 +42,8 @@ class IngestionOutput(BaseModel):
                     "is_final": True,
                 },
                 "timestamp": "2025-03-18T10:30:00.000Z",
-                "session_id": "meeting_abc123",
+                "session_id": "game_a1b2c3d4e5f67890",
+                "meeting_id": "meeting_xyz789",
                 "sequence_id": 42,
             }
         }

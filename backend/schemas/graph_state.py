@@ -1,4 +1,4 @@
-"""LangGraph checkpoint：只累积发言与摘要；决策上下文由推理 API 外部传入。"""
+"""LangGraph graph_state：只累积发言与摘要；决策上下文由推理 API 外部传入。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class PlayerRosterEntry(BaseModel):
     player_id: str = Field(...)
     seat_number: int = Field(...)
     color: str = Field(...)
-    status: PlayerStatus = Field(default="alive")
+    status: PlayerStatus = Field(default="存活")
     
 class EliminationRecord(BaseModel):
     victim_seat_number: int = Field(..., description="出局玩家座位号")
@@ -30,12 +30,15 @@ class VoteRecord(BaseModel):
     voted_number: int = Field(..., description="投票数")
     
 class MeetingRoundState(BaseModel):
-    # 确定性信息
-    round_id: str = Field(...)
+    """单轮会议状态；一轮对应本局内一次「开始监控新一轮会议」（与后端 meeting_id / 读入一致）。"""
+
+    meeting_id: str = Field(
+        ...,
+        description="与当次监控会话的 meeting_id 一致，不由用户随意编造",
+    )
     eliminations: list[EliminationRecord] = Field(default_factory=list)
     votes: list[VoteRecord] = Field(default_factory=list)
-    
-    # 不确定性信息
+
     my_view: str = Field(..., description="我视角下发生的事件简述")
 
 class GameSettings(BaseModel):
@@ -48,12 +51,18 @@ class GameSettings(BaseModel):
 class SituationSketch(BaseModel):
     game_settings: GameSettings = Field(...)
     player_roster: list[PlayerRosterEntry] = Field(default_factory=list, description="玩家列表")
-    meeting_rounds: list[MeetingRoundState] = Field(default_factory=list, description="会议轮次列表")
+    meeting_rounds: list[MeetingRoundState] = Field(
+        default_factory=list,
+        description=(
+            "本局内已发生的全部会议（每轮由「开始监控新一轮会议」绑定 meeting_id 追加，"
+            "非独立手建列表项；可在各轮内编辑淘汰、投票、我视角等）"
+        ),
+    )
     guessing_roles: dict[int, list[tuple[str, str]]] = Field(default_factory=dict, description="座位号到可能角色列表的映射，{座位号: [('阵营', '角色名称'), ...]}") 
 
 
 def default_situation_sketch() -> SituationSketch:
-    """Checkpoint 初始化用空壳结构化局势（数值由客户端/后续接口更新）。"""
+    """State 初始化用空壳结构化局势（数值由客户端/后续接口更新）。"""
     return SituationSketch(
         game_settings=GameSettings(
             goose_count=0,

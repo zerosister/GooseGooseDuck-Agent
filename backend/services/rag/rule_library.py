@@ -3,7 +3,7 @@ import os
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.model.factory import embedding_model
+from backend.model.factory import get_embedding_model
 from backend.utils.config_handler import chroma_conf
 from backend.utils.file_handler import (
     get_file_md5_hex,
@@ -18,11 +18,12 @@ from langchain_core.documents import Document
 
 
 class RuleLibrary(object):
-    def __init__(self, embedding=embedding_model):
+    def __init__(self, embedding=None):
+        embedding = embedding or get_embedding_model()
         self.rl = chroma_conf["rule_library"]
         self.vec_store = Chroma(
             collection_name=self.rl["collection_name"],
-            embedding_function=embedding_model,
+            embedding_function=embedding,
             persist_directory=get_abs_path(self.rl["persist_directory"]),
         )
         self.splitter = RecursiveCharacterTextSplitter(

@@ -8,17 +8,20 @@ import logging
 import os
 import queue
 import threading
+import traceback
+import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend import app_state
 from backend.agents.ingestion import IngestionAgent
 from backend.schemas.contract import DecisionOutput, IngestionOutput, iso_now
-from backend.schemas.decision import DecisionContext, PlayerRosterEntry
-from backend.services.situation_sketch import schedule_situation_sketch_after_ingestion
+from backend.schemas.graph_state import MemoryDecisionState, PlayerRosterEntry
+from backend.utils.color_roster_defaults import color_for_seat
+from backend.utils.session_checkpoint import ensure_session_state
 
 logger = logging.getLogger("ggd-a")
 
@@ -26,23 +29,72 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 _FRONTEND_INDEX = os.path.join(_REPO_ROOT, "frontend", "index.html")
 
 
-def _forward_ingestion_to_memory(ingestion: IngestionOutput) -> None:
-    """Schedule MemoryGraph.ainvoke on the main asyncio loop (called from ASR thread)."""
+async def memory_graph_ingestion_consumer(ingestion: IngestionOutput) -> None:
+    """IngestionAgent.consumer：与 POST /api/v1/ingestion 一致，写入 MemoryGraph。"""
     g = app_state.graph
-    loop = app_state.main_loop
-    if g is None or loop is None:
+    if g is None:
         logger.warning("Memory graph not ready; dropping ingestion")
+        return
+    await g.ainvoke(ingestion, ingestion.session_id)
+
+
+def _forward_ingestion_via_emit(agent: IngestionAgent, out: IngestionOutput) -> None:
+    """ASR 线程：经 IngestionAgent.emit（走 consumer）写入图，与 ingest_speech_frames 共用。"""
+    loop = app_state.main_loop
+    if loop is None:
+        logger.warning("main loop not ready; dropping ingestion")
         return
 
     async def _run() -> None:
-        await g.ainvoke(ingestion, ingestion.session_id)
-        await schedule_situation_sketch_after_ingestion(g, ingestion.session_id)
+        await agent.emit(out)
 
     fut = asyncio.run_coroutine_threadsafe(_run(), loop)
     try:
         fut.result(timeout=120)
     except Exception as e:
-        logger.warning("Failed to forward ingestion to memory graph: %s", e)
+        logger.warning(
+            "Failed to forward ingestion to memory graph: %s\n%s",
+            e,
+            traceback.format_exc(),
+        )
+
+
+async def _merge_gemini_roster_into_state(session_id: str, roster: list[dict]) -> None:
+    """将 Gemini 名单按 seat_number 合并进 graph_state.situation_sketch.player_roster（同座覆盖）。"""
+    g = app_state.graph
+    if g is None or not roster:
+        return
+    config = {"configurable": {"thread_id": session_id}}
+    snap = await g.graph.aget_state(config)
+    raw = snap.values
+    if not raw:
+        return
+    state = MemoryDecisionState.model_validate(raw)
+    by_seat: dict[int, PlayerRosterEntry] = {
+        e.seat_number: e for e in state.situation_sketch.player_roster
+    }
+    for r in roster:
+        try:
+            num = int(str(r.get("number", "0")).strip())
+        except ValueError:
+            continue
+        if not (1 <= num <= 16):
+            continue
+        name = (r.get("name") or "").strip() or str(num)
+        by_seat[num] = PlayerRosterEntry(
+            player_id=name,
+            seat_number=num,
+            color=color_for_seat(num),
+            status="存活",
+        )
+    merged = sorted(by_seat.values(), key=lambda x: x.seat_number)
+    new_sketch = state.situation_sketch.model_copy(update={"player_roster": merged})
+    payload = {"situation_sketch": new_sketch}
+    update_fn = getattr(g.graph, "aupdate_state", None)
+    if update_fn is not None:
+        await update_fn(config, payload, as_node="memory_draft")
+    else:
+        g.graph.update_state(config, payload, as_node="memory_draft")
 
 
 class ConnectionManager:
@@ -93,7 +145,14 @@ router = APIRouter(tags=["ingestion"])
 
 
 class StartMonitoringRequest(BaseModel):
-    session_id: str = "default_session"
+    session_id: str = Field(..., min_length=1, description="本局游戏 ID（LangGraph thread_id）")
+
+
+class NewGameRequest(BaseModel):
+    previous_session_id: Optional[str] = Field(
+        None,
+        description="上一局的 session_id，若提供则先删除该 thread 的 state",
+    )
 
 
 class StatusResponse(BaseModel):
@@ -102,6 +161,7 @@ class StatusResponse(BaseModel):
     current_speaker: Optional[str] = None
     window_title: Optional[str] = None
     session_id: Optional[str] = None
+    meeting_id: Optional[str] = None
 
 
 class MonitorController:
@@ -115,9 +175,14 @@ class MonitorController:
         self._audio_analyzer = None
         self._current_speaker: Optional[str] = None
         self._agent: Optional[IngestionAgent] = None
+        self._meeting_id: Optional[str] = None
         self.roster: list[dict] = []
 
     def _on_digit_change(self, new_digit, old_digit):
+        """
+        当屏幕监控识别到说话人数字编号（如玩家号码）变化时的回调函数，更新当前说话人。
+        并通过事件队列广播“speaker_change”事件。它还会通知音频分析器设置新的说话人。
+        """
         print(f"[SPEAKER] Change: {old_digit} -> {new_digit}", flush=True)
         self._current_speaker = new_digit
         event_queue.put(
@@ -130,31 +195,42 @@ class MonitorController:
             self._audio_analyzer.set_speaker(new_digit, round_num=1)
 
     def _on_new_record(self, record: dict[str, Any]):
+        """
+        当音频分析器（ASR）生成新的语音转文字记录时的回调函数。
+        它将语音文本封装为 IngestionOutput数据结构，通过事件队列广播“ingestion”事件，
+        并启动一个新线程调用 _forward_ingestion_via_emit 将数据发送到 IngestionAgent进行处理和写入内存图。
+        """
         print(f"[ASR] New record: speaker={record.get('speaker')}, text={record.get('text', '')!r}", flush=True)
         if not self._agent:
             return
         speaker_id = record.get("speaker") or self._current_speaker
         emotion = record.get("emotion")
         text = record.get("text", "")
+        mid = self._meeting_id
+        meta = {
+            **({"speaker_id": speaker_id} if speaker_id else {}),
+            **({"emotion_summary": str(emotion)} if emotion else {}),
+            "source": "legacy_audio_analyzer",
+        }
+        if mid:
+            meta["meeting_id"] = mid
         out = IngestionOutput(
             type="speech",
             content=text,
-            metadata={
-                **({"speaker_id": speaker_id} if speaker_id else {}),
-                **({"emotion_summary": str(emotion)} if emotion else {}),
-                "source": "legacy_audio_analyzer",
-            },
+            metadata=meta,
             timestamp=iso_now(),
             session_id=self._agent.session_id,
+            meeting_id=mid,
             sequence_id=record.get("id") or None,
         )
         event_queue.put({"type": "ingestion", "data": out.model_dump()})
-        threading.Thread(target=_forward_ingestion_to_memory, args=(out,), daemon=True).start()
+        threading.Thread(target=_forward_ingestion_via_emit, args=(self._agent, out), daemon=True).start()
 
     def init(self):
         return True
 
     def select_window(self):
+        """让用户选择要监控的游戏窗口，并记录窗口句柄（hwnd）和标题。"""
         try:
             from backend.legacy.window_selector import select_window  # lazy import (pywin32/tk deps)
         except Exception as e:
@@ -171,7 +247,7 @@ class MonitorController:
         self.window_title = str(title)
         return self.hwnd, self.window_title
 
-    def start(self, session_id: str):
+    def start(self, session_id: str, meeting_id: str):
         try:
             from backend.legacy.screen_monitor import WindowScreenMonitor  # lazy import (pywin32 deps)
             from backend.legacy.extract_speaker_statement import GooseGooseDuckAudioAnalyzer  # lazy import
@@ -187,11 +263,18 @@ class MonitorController:
             if self.hwnd is None:
                 raise RuntimeError("未选择窗口")
 
+            # 创建 IngestionAgent 实例
+            self._meeting_id = meeting_id
             print(f"[INIT] Creating IngestionAgent (session={session_id}) ...", flush=True)
-            self._agent = IngestionAgent(session_id=session_id)
+            self._agent = IngestionAgent(
+                session_id=session_id,
+                consumer=memory_graph_ingestion_consumer,
+            )
+            # 加载 ASR 模型
             print(f"[INIT] Loading ASR model (FunASR SenseVoice-Small) ...", flush=True)
             self._audio_analyzer = GooseGooseDuckAudioAnalyzer(on_new_record=self._on_new_record, auto_save=True)
             print(f"[INIT] ASR model loaded OK", flush=True)
+            # 创建屏幕监控实例
             print(f"[INIT] Creating screen monitor (hwnd={self.hwnd}, interval=0.5s) ...", flush=True)
             self._screen_monitor = WindowScreenMonitor(hwnd=self.hwnd, on_digit_change=self._on_digit_change, interval=0.5)
 
@@ -219,6 +302,7 @@ class MonitorController:
                 self._screen_monitor = None
                 self._audio_analyzer = None
                 self.is_running = False
+                self._meeting_id = None
         event_queue.put({"type": "status_change", "data": {"status": "stopped", "timestamp": iso_now()}})
         return True
 
@@ -229,6 +313,7 @@ class MonitorController:
             current_speaker=self._current_speaker,
             window_title=self.window_title,
             session_id=self._agent.session_id if self._agent else None,
+            meeting_id=self._meeting_id if self.is_running else None,
         )
 
 
@@ -268,15 +353,42 @@ async def api_select_window():
     return {"status": "success", "window": {"hwnd": hwnd, "title": title}}
 
 
+@router.post("/api/new-game")
+async def api_new_game(body: NewGameRequest = NewGameRequest()):
+    """生成本局 session_id；可选先删除上一局 thread 的 state。"""
+    g = app_state.graph
+    if g is None:
+        raise HTTPException(status_code=503, detail="MemoryGraph 未初始化")
+    prev = (body.previous_session_id or "").strip()
+    if prev:
+        try:
+            await g.checkpointer.adelete_thread(prev)
+        except Exception as e:
+            logger.warning("adelete_thread(%s) failed: %s", prev, e, exc_info=True)
+    session_id = f"game_{uuid.uuid4().hex}"
+    await ensure_session_state(session_id)
+    return {"status": "success", "session_id": session_id}
+
+
 @router.post("/api/start")
 async def api_start(req: StartMonitoringRequest):
+    sid = req.session_id.strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id 不能为空")
+    meeting_id = f"meeting_{uuid.uuid4().hex[:16]}"
     if controller.hwnd is None:
         await asyncio.get_event_loop().run_in_executor(None, controller.select_window)
         if controller.hwnd is None:
             return {"status": "cancelled", "message": "未选择窗口"}
     try:
-        await asyncio.get_event_loop().run_in_executor(None, lambda: controller.start(req.session_id))
-        return {"status": "success", "window_title": controller.window_title, "session_id": req.session_id}
+        await asyncio.get_event_loop().run_in_executor(None, lambda: controller.start(sid, meeting_id))
+        await ensure_session_state(sid)
+        return {
+            "status": "success",
+            "window_title": controller.window_title,
+            "session_id": sid,
+            "meeting_id": meeting_id,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -337,7 +449,12 @@ async def api_screenshot():
 
 
 @router.post("/api/scan-roster")
-async def api_scan_roster():
+async def api_scan_roster(
+    session_id: Optional[str] = Query(
+        None,
+        description="若提供且已有 state，则将名单合并写入该会话的 situation_sketch.player_roster",
+    ),
+):
     """Take screenshot and send to Gemini to extract player roster (number + name)."""
     if controller.hwnd is None:
         raise HTTPException(status_code=400, detail="未选择窗口")
@@ -359,6 +476,13 @@ async def api_scan_roster():
     if roster:
         controller.roster = roster
         event_queue.put({"type": "roster", "data": roster})
+        if session_id:
+            try:
+                await _merge_gemini_roster_into_state(session_id, roster)
+            except Exception as e:
+                logger.warning(
+                    "merge roster into situation_sketch failed: %s", e, exc_info=True
+                )
     return {"status": "success", "roster": roster}
 
 
@@ -395,43 +519,21 @@ class InferenceRequest(BaseModel):
     speaker_filter: Optional[list[str]] = None
 
 
-def _build_decision_context_for_inference(req: InferenceRequest) -> DecisionContext:
-    extra: dict[str, Any] = {}
-    if req.speaker_filter:
-        extra["speaker_filter"] = req.speaker_filter
-
-    roster_entries = [
-        PlayerRosterEntry(
-            player_id=r["name"] or r["number"],
-            seat_number=int(r["number"]),
-            color="",
-            metadata={},
-        )
-        for r in controller.roster
-    ] if controller.roster else []
-
-    return DecisionContext(
-        session_id=req.session_id,
-        self_player_number=req.self_player_number,
-        self_player_id=req.self_player_id,
-        role_name=req.role_name,
-        alignment=req.alignment,
-        rounds=[],
-        player_roster=roster_entries,
-        extra=extra,
-    )
-
-
 @router.post("/api/inference/stream")
 async def api_inference_stream(req: InferenceRequest):
     """决策流式：SSE，草稿 + 判官 + 修订阶段 token/工具事件，最后 type=done。"""
     from backend.routers.decision import execute_decision_stream
 
-    ctx = _build_decision_context_for_inference(req)
+    extra: dict[str, Any] = {}
+    if req.speaker_filter:
+        extra["speaker_filter"] = req.speaker_filter
 
     async def _gen():
         try:
-            async for ev in execute_decision_stream(ctx):
+            async for ev in execute_decision_stream(
+                req.session_id,
+                extra=extra or None,
+            ):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
                 if ev.get("type") == "done":
                     result = ev.get("result") or {}

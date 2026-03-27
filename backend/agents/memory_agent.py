@@ -129,10 +129,9 @@ class MemoryAgent:
             result = await self.agent.ainvoke(
                 input_state, invoke_config, context=ctx
             )
-        except (AttributeError, NotImplementedError, TypeError):
-            result = await asyncio.to_thread(
-                self.agent.invoke, input_state, invoke_config, context=ctx
-            )
+        except Exception as e:
+            logger.warning(f"MemoryAgent: error invoking agent: {e}")
+            raise e
 
         messages: list[BaseMessage] = list(result.get("messages") or [])
         summary_text = last_ai_text(messages)

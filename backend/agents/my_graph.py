@@ -18,9 +18,10 @@ from backend.agents.decision_agent import DecisionAgent
 from backend.agents.memory_agent import MemoryAgent
 from backend.agents.rule_critic_agent import RuleCriticAgent, is_rule_critic_enabled
 from backend.schemas.contract import IngestionOutput, MemorySummary
-from backend.schemas.decision import DecisionContext, DecisionResult, RuleCriticReview
+from backend.schemas.decision import DecisionResult, RuleCriticReview
 from backend.schemas.graph_state import MemoryDecisionState, SituationSketch
 from backend.utils.config_handler import agent_conf
+from backend.utils.logger_handler import logger
 from backend.utils.situation_context import (
     get_situation_sketch,
     get_situation_sketch_narrative,
@@ -42,6 +43,7 @@ class MemoryGraph:
 
     def _route_after_memory_draft(self, state: MemoryDecisionState) -> str:
         if not state.summary or not state.ingestions:
+            logger.warning("MemoryGraph: no summary or ingestions")
             return END
         if not is_rule_critic_enabled():
             return END

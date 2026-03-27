@@ -53,11 +53,10 @@ def _merge_extra_into_system_message(
 
 
 @wrap_model_call
-def situation_sketch_model_context(
+async def situation_sketch_model_context(
     request: ModelRequest,
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
-    logger.info(f"[situation sketch model context] 嵌入situation sketch信息到模型: {request.model.name}")
     ctx = request.runtime.context
     sk = getattr(ctx, "situation_sketch", None)
     nar = getattr(ctx, "situation_sketch_narrative", None)
@@ -65,8 +64,26 @@ def situation_sketch_model_context(
     narrative_str = nar if isinstance(nar, str) else None
     blob = format_situation_sketch_for_model(sketch_obj, narrative_str)
     if not blob.strip():
-        return handler(request)
-    return handler(_merge_extra_into_system_message(request, blob))
+        return await handler(request)
+    return await handler(_merge_extra_into_system_message(request, blob))
+
+
+def _tool_call_name_args(req: ToolCallRequest) -> tuple[str, object]:
+    """兼容 dict / 对象，避免 tool_call 结构差异导致 KeyError。"""
+    tc = getattr(req, "tool_call", None)
+    if tc is None:
+        return "?", {}
+    if isinstance(tc, dict):
+        name = tc.get("name")
+        if name is None and isinstance(tc.get("function"), dict):
+            name = tc["function"].get("name")
+        args = tc.get("args")
+        if args is None and "arguments" in tc:
+            args = tc.get("arguments")
+        return str(name or "?"), args if args is not None else {}
+    name = getattr(tc, "name", None) or getattr(tc, "id", None)
+    args = getattr(tc, "args", None)
+    return str(name or "?"), args if args is not None else {}
 
 
 @wrap_tool_call
@@ -76,24 +93,17 @@ async def monitor_tool(
 ) -> ToolMessage | Command:
     """监控工具调用，并记录工具调用日志。"""
 
-    logger.info(f"[tool monitor] 执行工具: {request.tool_call['name']}")
-    logger.info(f"[tool monitor] 工具参数: {request.tool_call['args']}")
+    tname, targs = _tool_call_name_args(request)
+    logger.info(f"[tool monitor] 执行工具: {tname}")
+    logger.info(f"[tool monitor] 工具参数: {targs}")
 
     try:
         result = await handler(request)
-        logger.info(f"[tool monitor] 工具 {request.tool_call['name']} 执行成功")
+        logger.info(f"[tool monitor] 工具 {tname} 执行成功")
         return result
     except Exception as e:
-        logger.error(f"工具{request.tool_call['name']}调用失败，原因：{str(e)}")
+        logger.error(f"工具{tname}调用失败，原因：{str(e)}")
         raise e
-
-
-@before_agent
-async def before_agent_middleware(state: AgentState, runtime: Runtime) -> None:
-    """在 Agent 执行前记录日志。"""
-    name = getattr(state, "agent_name", None) or getattr(state, "name", "?")
-    logger.info(f"[agent before] 执行 Agent: {name}")
-    return None
 
 
 @dataclass
@@ -123,6 +133,34 @@ class RuleCriticContext:
     situation_sketch_narrative: str | None = None
 
 
+def _agent_log_label(runtime: Runtime) -> str:
+    """LangChain AgentState 通常无 name；用语境类型 + phase 区分。"""
+    ctx = getattr(runtime, "context", None)
+    if isinstance(ctx, MemoryAgentContext):
+        return f"memory_agent:{ctx.phase}"
+    if isinstance(ctx, DecisionAgentContext):
+        return f"decision_agent:{ctx.phase}"
+    if isinstance(ctx, RuleCriticContext):
+        return f"rule_critic:{ctx.phase}"
+    if ctx is not None:
+        ph = getattr(ctx, "phase", None)
+        if ph is not None:
+            return f"context:{ph}"
+    name = getattr(runtime, "name", None)
+    if name:
+        return str(name)
+    return "agent"
+
+
+@before_agent
+async def before_agent_middleware(state: AgentState, runtime: Runtime) -> None:
+    """在 Agent 执行前记录日志。"""
+    fallback = getattr(state, "agent_name", None) or getattr(state, "name", None)
+    label = fallback if fallback else _agent_log_label(runtime)
+    logger.info(f"[agent before] 执行 Agent: {label}")
+    return None
+
+
 def _phase_str(ctx: object, attr: str = "phase") -> str | None:
     if ctx is None:
         return None
@@ -133,6 +171,7 @@ def _phase_str(ctx: object, attr: str = "phase") -> str | None:
 
 
 def memory_phase_prompt_middleware(draft_system: str, revise_system: str):
+    logger.info(f"[memory phase prompt middleware] 选择阶段: draft_system 或 revise_system")
     @dynamic_prompt
     def _select(request: ModelRequest) -> str:
         if _phase_str(request.runtime.context) == "revise":
@@ -145,6 +184,7 @@ def memory_phase_prompt_middleware(draft_system: str, revise_system: str):
 
 
 def decision_phase_prompt_middleware(draft_system: str, revise_system: str):
+    logger.info(f"[decision phase prompt middleware] 选择阶段: {draft_system} 或 {revise_system}")
     @dynamic_prompt
     def _select(request: ModelRequest) -> str:
         if _phase_str(request.runtime.context) == "revise":
@@ -157,6 +197,7 @@ def decision_phase_prompt_middleware(draft_system: str, revise_system: str):
 
 
 def rule_critic_phase_prompt_middleware(memory_system: str, decision_system: str):
+    logger.info(f"[rule critic phase prompt middleware] 选择阶段: {memory_system} 或 {decision_system}")
     @dynamic_prompt
     def _select(request: ModelRequest) -> str:
         if _phase_str(request.runtime.context) == "decision":

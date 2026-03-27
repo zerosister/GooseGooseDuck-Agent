@@ -71,7 +71,9 @@ START
 
 - **A 侧监控线程**（`backend/routers/ingestion.py`）：`_forward_ingestion_to_memory` 在主事件循环上调度 `graph.ainvoke` + `schedule_situation_sketch_after_ingestion`。
 - **B 侧 HTTP**（`POST /api/v1/ingestion`）：同样 `ainvoke` + 局势笔记调度。
-- **推理流式**（`POST /api/inference/stream`）：构造 `DecisionContext`，调用 `execute_decision_stream`，不经过「单条 ingestion」Graph，但依赖此前已累积的 checkpoint。
+- **推理流式**（`POST /api/inference/stream`）：传入 `session_id` 与可选 `extra`（如 `speaker_filter`），调用 `execute_decision_stream(session_id, extra=...)`，不经过「单条 ingestion」Graph，但依赖此前已累积的 checkpoint。
+- **局势写入**（`PUT /api/v1/situation-sketch`）：请求体为 `session_id` + 完整 `situation_sketch`，写入 checkpoint（与 `persist_decision_result` 相同 `aupdate_state` 方式）。
+- **识别名单**（`POST /api/scan-roster?session_id=`）：可选 query；若提供 `session_id` 且已有 checkpoint，将 Gemini 名单按座位合并进 `situation_sketch.player_roster`。
 
 ---
 

@@ -10,7 +10,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.model.factory import embedding_model
+from backend.model.factory import get_embedding_model
 
 from backend.utils.config_handler import chroma_conf
 from backend.utils.path_tool import get_abs_path
@@ -24,11 +24,8 @@ ALLOWED_MSGPACK_MODULES = [
     ("backend.schemas.contract", "IngestionOutput"),
     ("backend.schemas.contract", "PlayerState"),
     ("backend.schemas.contract", "MemorySummary"),
-    ("backend.schemas.decision", "DecisionContext"),
     ("backend.schemas.decision", "DecisionResult"),
-    ("backend.schemas.decision", "PlayerRosterEntry"),
-    ("backend.schemas.decision", "EliminationRecord"),
-    ("backend.schemas.decision", "MeetingRoundState"),
+    ("backend.schemas.decision", "RuleCriticReview"),
     ("backend.schemas.graph_state", "MemoryDecisionState"),
     ("backend.schemas.graph_state", "SituationSketch"),
     ("backend.schemas.graph_state", "GameSettings"),
@@ -51,11 +48,12 @@ class ShortTermMemoryStore:
         
 class LongTermMemoryStore:
     """跨局记忆向量存储，复用现有 Chroma + Embedding。可以先不用"""
-    def __init__(self, embedding=embedding_model):
+    def __init__(self, embedding=None):
         """embedding:嵌入模型的传入"""
+        embedding = embedding or get_embedding_model()
         self.vec_store = Chroma(
             collection_name=chroma_conf['long_term_memory']['collection_name'],
-            embedding_function=embedding_model,
+            embedding_function=embedding,
             persist_directory=chroma_conf['long_term_memory']['persist_directory']
         )
         self.splitter = RecursiveCharacterTextSplitter(

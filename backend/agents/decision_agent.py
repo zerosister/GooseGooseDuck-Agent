@@ -1,6 +1,3 @@
-from langchain_core.messages.base import BaseMessage
-
-
 from __future__ import annotations
 
 import json
@@ -21,7 +18,7 @@ from backend.agents.middleware import (
 from backend.schemas.contract import IngestionOutput, MemorySummary
 from backend.schemas.graph_state import SituationSketch
 from backend.schemas.decision import DecisionResult, RuleCriticReview
-from backend.model.factory import get_decision_chat_model_stream
+from backend.model.factory import get_decision_chat_model
 from backend.services import rag_query
 from backend.utils.config_handler import agent_conf
 from backend.utils.logger_handler import logger
@@ -123,7 +120,7 @@ class DecisionAgent:
         )
         self._revise_system = rev_sys
         self._revise_user_template = rev_user
-        stream_model = model if model is not None else get_decision_chat_model_stream()
+        stream_model = model if model is not None else get_decision_chat_model()
         if not isinstance(stream_model, BaseChatModel):
             raise TypeError("DecisionAgent model must be a BaseChatModel instance")
         _require_stream_model(stream_model)
@@ -203,7 +200,7 @@ class DecisionAgent:
         except Exception as e:
             logger.error("DecisionAgent.run_draft_stream: astream_events failed: %s", e)
             raise RuntimeError(
-                "决策草稿流式失败（不支持非流式回退）。请检查模型是否支持流式。"
+                f"决策草稿流式失败（不支持非流式回退）。原始错误：{e}"
             ) from e
 
         if messages is None:

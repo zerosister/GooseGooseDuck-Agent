@@ -16,6 +16,8 @@ AsyncConsumer = Callable[[IngestionOutput], Awaitable[None]]
 
 @dataclass
 class IngestionAgent:
+    """读入侧：ingest_speech_frames / 监控回调经 emit 调用 consumer（如 MemoryGraph）。"""
+
     session_id: str
     consumer: Optional[AsyncConsumer] = None
 
@@ -63,6 +65,7 @@ class IngestionAgent:
             },
             timestamp=iso_now(),
             session_id=self.session_id,
+            meeting_id=None,
             sequence_id=self._next_seq(),
         )
         return await self.emit(output)

@@ -17,10 +17,10 @@ from backend.agents.middleware import (
     monitor_tool,
     situation_sketch_model_context,
 )
-from backend.model.factory import get_rule_critic_chat_model_stream
+from backend.model.factory import get_rule_critic_chat_model
 from backend.schemas.contract import IngestionOutput, MemorySummary
 from backend.schemas.graph_state import SituationSketch
-from backend.schemas.decision import DecisionContext, DecisionResult, RuleCriticReview
+from backend.schemas.decision import DecisionResult, RuleCriticReview
 from backend.services import rag_query
 from backend.utils.config_handler import agent_conf
 from backend.utils.logger_handler import logger
@@ -60,7 +60,7 @@ def is_rule_critic_enabled() -> bool:
 
 
 def _recursion_limit() -> int:
-    return int(agent_conf.get("rule_critic") or {}.get("recursion_limit", 15))
+    return int(agent_conf.get("rule_critic").get("recursion_limit", 15))
 
 
 def _timeout_seconds(which: str) -> float:
@@ -126,7 +126,7 @@ class RuleCriticAgent:
         self._review_memory_user_template = mu
         self._review_decision_system_prompt = ds
         self._review_decision_user_template = du
-        stream_model = model if model is not None else get_rule_critic_chat_model_stream()
+        stream_model = model if model is not None else get_rule_critic_chat_model()
         if not isinstance(stream_model, BaseChatModel):
             raise TypeError("RuleCriticAgent model must be a BaseChatModel instance")
         _require_stream_model(stream_model)
@@ -201,6 +201,8 @@ class RuleCriticAgent:
                 raw_notes=None,
             )
 
+        logger.info(f"[rule critic agent] 开始记忆判官: {situation_sketch.model_dump()}")
+        
         timeout = _timeout_seconds("memory")
         mem_json = json.dumps(
             summary.model_dump(),
@@ -291,6 +293,8 @@ class RuleCriticAgent:
                 "rule_critic_debug_prompt": None,
             }
             return
+
+        logger.info(f"[rule critic agent] 开始决策判官: {situation_sketch.model_dump()}")
 
         user_content = (
             self._review_decision_user_template
