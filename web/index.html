@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>鹅鸭杀分析助手 Baseline</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 920px; margin: 24px auto; padding: 0 12px; }
+      button { margin-right: 8px; margin-bottom: 8px; }
+      pre { background: #111; color: #0f0; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+      video { width: 420px; border: 1px solid #ddd; border-radius: 8px; }
+    </style>
+  </head>
+  <body>
+    <h2>鹅鸭杀分析助手 Baseline</h2>
+    <p>流程：选择屏幕/窗口 -> 连接后端 -> 推送截图/音频 -> 触发分析。</p>
+
+    <div>
+      <button id="btnPick">1. 选择窗口</button>
+      <button id="btnConnect">2. 连接WS</button>
+      <button id="btnStart">3. 开始采集</button>
+      <button id="btnAnalyze">4. 立即分析</button>
+      <button id="btnStop">停止</button>
+    </div>
+
+    <video id="preview" autoplay muted playsinline></video>
+    <pre id="log"></pre>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>

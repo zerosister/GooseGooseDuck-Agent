@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+langgraph
+dashscope
+rapidocr-onnxruntime
+funasr
+# SoundCard 0.4.x (mediafoundation) 与 NumPy 2.x 不兼容；若需 NumPy 2 请升级 SoundCard 或换采集方案
+numpy>=1.26,<2.0
+pillow
+soundcard
+torch
+torchaudio
