@@ -12,6 +12,7 @@ from app.pipeline.analysis_graph import AnalysisEngine
 from app.audio.capture_service import BackendAudioCaptureService
 from app.pipeline.input_processing import InputProcessor
 from utils.logger import get_logger, log_error, log_event
+import logging
 
 app = FastAPI(title="GooseGooseDuck Baseline Assistant")
 app.add_middleware(
@@ -23,10 +24,17 @@ app.add_middleware(
 )
 
 logger = get_logger("ggd-baseline")
-input_processor = InputProcessor(logger=logger)
-analysis_engine = AnalysisEngine(logger=logger)
+logger.setLevel(logging.ERROR)
+logger_input_processing = get_logger("ggd-baseline.input-processing")
+logger_input_processing.setLevel(logging.INFO)
+logger_analysis_graph = get_logger("ggd-baseline.analysis-graph")
+logger_analysis_realtime = get_logger("ggd-baseline.analysis-realtime")
+logger_analysis_realtime.setLevel(logging.INFO)
+input_processor = InputProcessor(logger=logger_input_processing)
+analysis_engine = AnalysisEngine(logger_1=logger_analysis_graph, logger_2=logger_analysis_realtime)
 
 session_speeches: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+session_slice_results: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
 
 @app.get("/health")
@@ -125,6 +133,41 @@ async def ws_analyze(websocket: WebSocket) -> None:
                     speech = input_processor.process_frame(session_id, frame_b64)
                     if speech.get("text"):
                         session_speeches[session_id].append(speech)
+                    frame_path = speech.get("frame_path", "")
+                    if frame_path:
+                        rt_state = analysis_engine.process_frame(
+                            session_id=session_id,
+                            frame_path=frame_path,
+                            seat_map_init_fn=input_processor.initialize_seat_map_from_frame,
+                            speaker_detect_fn=input_processor.detect_speaker_status_from_frame,
+                        )
+                        event = rt_state.get("pending_speech_event")
+                        if event:
+                            sliced = input_processor.slice_audio_by_event(
+                                session_id=session_id,
+                                event=event,
+                                audio_ring=audio_service.get_ring_buffer_snapshot(),
+                            )
+                            session_slice_results[session_id].append(sliced)
+                            log_event(
+                                logger,
+                                "audio_sliced",
+                                session_id,
+                                payload={
+                                    "player_id": sliced.get("player_id"),
+                                    "audio_file_count": len(sliced.get("audio_files", [])),
+                                    "start_ts": sliced.get("start_ts"),
+                                    "end_ts": sliced.get("end_ts"),
+                                },
+                            )
+                            await websocket.send_json(
+                                {
+                                    "type": "speech_event",
+                                    "session_id": session_id,
+                                    "event": event,
+                                    "slice": sliced,
+                                }
+                            )
             elif msg_type == "analyze":
                 speeches = session_speeches.get(session_id, [])
                 result = await analysis_engine.run(session_id, speeches)
@@ -134,6 +177,7 @@ async def ws_analyze(websocket: WebSocket) -> None:
                         "session_id": session_id,
                         "speech_count": len(speeches),
                         "result": result,
+                        "slice_count": len(session_slice_results.get(session_id, [])),
                     }
                 )
                 log_event(
@@ -144,6 +188,8 @@ async def ws_analyze(websocket: WebSocket) -> None:
                 )
             elif msg_type == "reset":
                 session_speeches[session_id] = []
+                session_slice_results[session_id] = []
+                analysis_engine.reset_session(session_id)
                 await websocket.send_json({"type": "reset_ok", "session_id": session_id})
                 log_event(logger, "session_reset", session_id)
             else:

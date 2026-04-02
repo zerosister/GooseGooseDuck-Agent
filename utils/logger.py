@@ -46,11 +46,20 @@ def _build_handler(filename: str) -> RotatingFileHandler:
 
 def get_logger(name: str = "ggd") -> logging.Logger:
     logger = logging.getLogger(name)
-    if logger.handlers:
-        return logger
-    logger.setLevel(logging.INFO)
-    logger.addHandler(_build_handler("app.log"))
-    logger.propagate = False
+    
+    # 1. 获取顶级名称（例如 "ggd.engine" -> "ggd"）
+    top_level_name = name.split('.')[0]
+    top_logger = logging.getLogger(top_level_name)
+    
+    # 2. 核心逻辑：如果顶级 Logger 还没有配置 Handler，就给它配置
+    # 这样无论你请求的是 "ggd" 还是 "ggd.engine"，都会确保 "ggd" 已经被初始化
+    if not top_logger.handlers:
+        top_logger.setLevel(logging.INFO)
+        # 假设 _build_handler 是你定义的返回 Handler 的函数
+        handler = _build_handler(f"{top_level_name}.log") 
+        top_logger.addHandler(handler)
+        top_logger.propagate = False 
+        
     return logger
 
 
@@ -61,6 +70,9 @@ def log_event(
     payload: Optional[Dict[str, Any]] = None,
     level: int = logging.INFO,
 ) -> None:
+    # 先判断当前 logger 是否开启了此级别
+    if not logger.isEnabledFor(level):
+        return
     record = {
         "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "event_type": event_type,

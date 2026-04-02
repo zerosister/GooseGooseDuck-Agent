@@ -3,8 +3,9 @@ import queue
 import threading
 import time
 import traceback
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 import numpy as np
 
@@ -38,6 +39,8 @@ class AudioChunk:
     source: str
     pcm16: np.ndarray
     sample_rate: int
+    start_ts: float
+    end_ts: float
 
 
 def _get_loopback_microphone():
@@ -74,6 +77,9 @@ class BackendAudioCaptureService:
         self.sample_rate = sample_rate
         self.chunk_seconds = chunk_seconds
         self._queue: "queue.Queue[AudioChunk]" = queue.Queue()
+        self._ring_buffer: Deque[AudioChunk] = deque()
+        self._ring_lock = threading.Lock()
+        self._ring_seconds = 10.0
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._chunk_seq = 0                            # 音频块序列号
@@ -200,11 +206,25 @@ class BackendAudioCaptureService:
         
         pcm = np.clip(data, -1.0, 1.0)
         pcm16 = (pcm * 32767.0).astype(np.int16)
+        end_ts = time.time()
+        duration = float(pcm16.size) / float(self.sample_rate) if self.sample_rate > 0 else 0.0
+        start_ts = end_ts - duration
         self._chunk_seq += 1
         seq = self._chunk_seq
         peak = float(np.max(np.abs(pcm16))) / 32767.0 if pcm16.size else 0.0
-        chunk = AudioChunk(source=source, pcm16=pcm16, sample_rate=self.sample_rate)
+        chunk = AudioChunk(
+            source=source,
+            pcm16=pcm16,
+            sample_rate=self.sample_rate,
+            start_ts=start_ts,
+            end_ts=end_ts,
+        )
         self._queue.put(chunk)
+        with self._ring_lock:
+            self._ring_buffer.append(chunk)
+            min_keep_ts = end_ts - self._ring_seconds
+            while self._ring_buffer and self._ring_buffer[0].end_ts < min_keep_ts:
+                self._ring_buffer.popleft()
         qsz = 0
         try:
             qsz = self._queue.qsize()
@@ -219,8 +239,23 @@ class BackendAudioCaptureService:
                 "samples": int(pcm16.size),
                 "peak_normalized": round(peak, 6),
                 "queue_size_after": qsz,
+                "start_ts": start_ts,
+                "end_ts": end_ts,
             },
         )
+
+    def get_ring_buffer_snapshot(self) -> List[Dict[str, Any]]:
+        with self._ring_lock:
+            return [
+                {
+                    "source": c.source,
+                    "pcm16": c.pcm16.copy(),
+                    "sample_rate": c.sample_rate,
+                    "start_ts": c.start_ts,
+                    "end_ts": c.end_ts,
+                }
+                for c in self._ring_buffer
+            ]
 
     def _capture_microphone_loop(self) -> None:
         if sc is None:
