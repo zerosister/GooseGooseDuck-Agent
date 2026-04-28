@@ -1,0 +1,8 @@
+loguru
+pyyaml
+pydantic
+soundcard
+soundfile 
+numpy
+faster-whisper
+onnxruntime    # 可以不用下载 silero-vad，仓库实现已经参考了官方库使用
