@@ -14,12 +14,18 @@ audio:
   min_segment_time: 0.5          # 最小语音分段时长（秒），送至ASR模型
   max_segment_time: 15           # 最大语音分段时长（秒），送至ASR模型
   vad_threshold: 0.3             # 静音阈值（0-1）
-  vad_model_path: "backend/models/silero_vad.onnx"
+  vad_model: "silero_vad.onnx"   # vad 参数，默认如下：silero_vad=SileroVadModelConfig(model="", threshold=0.5, min_silence_duration=0.5, min_speech_duration=0.25, max_speech_duration=20, window_size=512, neg_threshold=-1)
+  spk_model: "3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx"
 
 asr:
-  model_size: "base"  # 如 "base","small","medium"
-  device: "cpu"       # 如 "cpu","gpu"
-  compute_type: "int8" # "int8", "float16" (cuda下常用)
+  asr_dir: "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30"
+  asr_model: ""                  # "sherpa-onnx-streaming-zipformer-ctc-small-2024-03-18/ctc-epoch-30-avg-3-chunk-16-left-128.int8.onnx"
+  graph: ""                      # 使用图的模型才需要如 "sherpa-onnx-streaming-zipformer-ctc-small-2024-03-18/HLG.fst"
+  tokens: "tokens.txt"
+  encoder: "encoder.int8.onnx"
+  decoder: "decoder.onnx"
+  joiner: "joiner.int8.onnx"
+  provider: "cpu"                # "cuda"
 
 models:
   whisper_model_path: "backend/models/whisper-tiny"

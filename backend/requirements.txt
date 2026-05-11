@@ -6,3 +6,8 @@ soundfile
 numpy
 faster-whisper
 onnxruntime    # 可以不用下载 silero-vad，仓库实现已经参考了官方库使用
+fastapi
+uvicorn[standard]
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+paddlepaddle==3.2.0
+paddleocr

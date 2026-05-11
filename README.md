@@ -49,6 +49,14 @@ goosegooseduck-agent/
 - 窗口捕获：WebRTC
 - 实时通信：WebSocket
 
+> 经过实践，在 AMD Ryzen 7 5800H 上 Faster-Whisper 的处理速度还是过慢。考虑采用 FunASR 框架下的 SenseVoice 模型。[选模型参考文章](https://juejin.cn/post/7599474528238452776)
+> 且 FunASR 还能集成 VAD 与声纹识别模型，更方便开发。
+>
+> FunASR 未能找到合适的使用文档，改用sherpa-onnx
+
+
+OCR 用到模型：[PP-OCRv5_mobile_rec-ONNX](https://www.modelscope.cn/models/Liyulingyue/PP-OCRv5_mobile_rec-ONNX/files)
+
 ### 系统架构设计
 
 生产者-消费者模型

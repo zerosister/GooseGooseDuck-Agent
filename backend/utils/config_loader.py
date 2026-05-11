@@ -14,30 +14,39 @@ class AudioConfig(BaseModel):
     device_index: Optional[int] = Field(None)
     save_path: str
     save_temp: bool
-    vad_threshold: float
     min_silence_time: float
     max_silence_time: float
     min_segment_time: float
     max_segment_time: float
     vad_threshold: float
-    vad_model_path: str
+    vad_model: str
+    spk_model: str
+
+class ASRConfig(BaseModel):
+    asr_dir: str
+    asr_model: str
+    graph: str
+    tokens: str
+    encoder: str
+    decoder: str
+    joiner: str
+    provider: str
 
 class ModelConfig(BaseModel):
     whisper_model_path: str
     ocr_model_dir: str
     compute_type: str
 
-class ASRConfig(BaseModel):
-    model_size: str
-    device: str
-    compute_type: str
+class VisionConfig(BaseModel):
+    fps: int
+    roi_regions: List[List[int]]
 
 class AppConfig(BaseModel):
     server: ServerConfig
     audio: AudioConfig
-    models: ModelConfig
-    vision: dict # 也可以继续细化
     asr: ASRConfig
+    models: ModelConfig
+    vision: VisionConfig
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:
     config_path = get_abs_path(config_path)

@@ -1,85 +1,81 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
-import HelloWorld from './components/HelloWorld.vue'
+import { ref } from 'vue'
+import ScreenCapture from './components/ScreenCapture.vue'
+import SpeechLog from './components/SpeechLog.vue'
+
+// 使用 InstanceType 获取组件的公共实例类型
+const speechLogRef = ref<InstanceType<typeof SpeechLog> | null>(null)
+
+const onSpeechMessage = (data: any) => {
+  // 此时 TypeScript 知道 speechLogRef 包含 handleIncomingSpeech 方法
+  if (speechLogRef.value) {
+    speechLogRef.value.handleIncomingSpeech(data)
+  }
+}
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="@/assets/logo.svg" width="125" height="125" />
+  <div class="app-container">
+    <header class="main-header">
+      <div class="logo">GGD <span>Vision Admin</span></div>
+      <p class="desc">5x3 阵位自适应感知控制台</p>
+    </header>
 
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
+    <main class="content-area">
+      <div class="main-layout">
+        <ScreenCapture @speech-data="onSpeechMessage" />
+        <SpeechLog ref="speechLogRef" />
+      </div>
+    </main>
 
-      <nav>
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink to="/about">About</RouterLink>
-      </nav>
-    </div>
-  </header>
-
-  <RouterView />
+    <footer class="footer">
+      <div class="tip">💡 提示：系统将自动通过 HSV 检测边框，并利用 ASR 整合相同发言人的内容。</div>
+    </footer>
+  </div>
 </template>
 
-<style scoped>
-header {
-  line-height: 1.5;
-  max-height: 100vh;
+<style>
+:root {
+  --bg-color: #0a0a0a;
+  --accent-color: #42b883;
 }
 
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
+body {
+  margin: 0;
+  background-color: var(--bg-color);
+  color: #fff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-nav {
-  width: 100%;
-  font-size: 12px;
-  text-align: center;
-  margin-top: 2rem;
+.app-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  min-height: 100vh;
 }
 
-nav a.router-link-exact-active {
-  color: var(--color-text);
+.main-header { text-align: center; margin-bottom: 20px; }
+.logo { font-size: 2.4rem; font-weight: 800; color: var(--accent-color); letter-spacing: -1.5px; }
+.logo span { color: #fff; font-weight: 200; }
+
+/* 核心布局：左右分栏 */
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0; /* 紧贴布局 */
+  background: #121212;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #333;
 }
 
-nav a.router-link-exact-active:hover {
-  background-color: transparent;
+.content-area {
+  box-shadow: 0 30px 60px rgba(0,0,0,0.6);
 }
 
-nav a {
-  display: inline-block;
-  padding: 0 1rem;
-  border-left: 1px solid var(--color-border);
-}
-
-nav a:first-of-type {
-  border: 0;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  nav {
-    text-align: left;
-    margin-left: -1rem;
-    font-size: 1rem;
-
-    padding: 1rem 0;
-    margin-top: 1rem;
-  }
-}
+.footer { margin-top: 20px; color: #666; font-size: 0.9rem; }
+.tip { background: #1a1a1a; padding: 10px 20px; border-radius: 8px; border-left: 4px solid var(--accent-color); }
 </style>
