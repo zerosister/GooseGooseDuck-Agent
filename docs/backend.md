@@ -41,6 +41,20 @@ silero VAD 的实现针对每一个`chunk`的大小都是有限制的，如果�
 
 - 解决方案：将音频采集线程作为主线程。Speaker识别与ASR放在子线程中。采用**生产者-消费者**模型 [audio_capture](../backend/app/services/audio_service/audio_capture.py)
 
+# 视频帧获取
+
+1. 对MUMU模拟器，因为虚拟安卓机可以采用 ADB（Android Debug Bridge）进行通信。所以截取到的屏幕一定是该窗口流信息，不会因为其他窗口置于顶层而受影响。
+2. 对于媒体播放器。则采用 `pywin32` 库进行窗口截取,需要保证媒体播放器不被最小化.
+
+注意到在 `_init_adb` 中用 `subprocess` 开启了 adb server,这里不会复制当前进程的内存数据.而是 **执行的外部程序启动**.
+```python
+subprocess.run(["adb", "start-server"], check=True, capture_output=True)
+```
+
+对于 [video_frame_capture.py](../backend/app/services/video_frame_capture.py) 中，想要保持FPS不变的情况下对于异步函数`ws_manager.broadcast()` 的调用。需要用到 **在同步函数中调用异步函数** 的做法：
+- 将要执行的协程对象`ws_manager.broadcast(speaker_info)`和运行该协程的时间循环传入
+- 获得返回的 `concurrent.futures.Future` 对象，不会阻塞当前截图线程。
+
 # 视频帧处理
 
 OCR 需要异步单开一个线程做，因为除开座位识别，说话人识别仍然需要拾取特定区域的文字。
@@ -89,6 +103,22 @@ res = {
     - 次高优先级：HSV 对话框判定（发言者的座位卡片边框变黄色，当黄色区域超过阈值时确定发言者）。当 UI 内容无法识别出号码时，采用此方法。
     - 最低优先级：根据 audio 处理中的 speaker 识别进行判定。需要根据 vision_history 中发言者出现的结果进行判定。（但也可基本不用此方法，因为无法与座位 ID 对应）
 
+### 为什么要用多线程，异步？
+
+- **最初版**实现中audio_capture 中调用了 ggd-coordinator 的 `on_audio_result` 函数，该函数又调用了 `_dispatch_result`。而 audio-capture 是异步的，如果向 WebSocket 发送这个任务耗时过长，会阻塞 audio_capture。
+
+为了加快处理速度。设置一个 `EventLoop` 事件队列——调度员，该调度员不参与具体的CPU密集型计算。而是将**说话人判定**，**WS结果发送** 等具体任务下发。同样，对于 audio_capture 的结果也是直接放入提前设置的 `task_queue` 中，等待说话人判定任务消费。
+
+# WebSocket 数据传输细节
+
+- [ws_manager.py](../backend/app/core/ws_manager.py) 内置了一个单例的连接管理器。他的作用是统一对所有连接的客户端发送 json 信息。
+- [my_router.py](../backend/app/api/my_router.py) 中规定了 api 的访问地址。
+  - **/ws/stream** 建立一个视觉流的双向通道。
+    1. 从客户端得到其截取的视频帧
+    2. 等待 `vision_service` 的 HSV 边框判定结果（这个等待是阻塞的），必须等其处理完毕才能发送给客户端。
+    3. 将处理结果发送给客户端。（即：当前帧说话人） 然后再继续监听视频帧。
+
+上述提到的视觉流双向通道同时还接收 ggd-coordinator 的说话内容与说话人结果。由于这个信息需要经过 ASR 处理，所以不是与监听同步的。而是触发的，一旦有结果则通过 ws_manager 发送给客户端。
 
 # [main.py](../backend/main.py) 解释
 

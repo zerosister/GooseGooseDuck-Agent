@@ -11,3 +11,7 @@ uvicorn[standard]
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
 paddlepaddle==3.2.0
 paddleocr
+mss
+pygetwindow
+pure-python-adb 
+pywin32

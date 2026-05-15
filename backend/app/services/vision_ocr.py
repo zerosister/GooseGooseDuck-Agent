@@ -114,7 +114,7 @@ class GGDVisionService:
         手动触发此函数重新读取 JSON 并更新内存中的坐标。
         """
         log.info("接收到更新指令，正在重新加载标定配置...")
-        self._load_roi_config()
+        return self._load_roi_config()
 
     def _ocr_scan_loop(self):
         """后台线程：同时处理 ID 识别（直到完成）和 UI 提示词识别（持续）"""
@@ -153,13 +153,11 @@ class GGDVisionService:
             except Exception as e:
                 log.error(f"OCR 线程异常: {e}")
 
-    def process_frame(self, frame_bytes: bytes) -> Dict:
+    def process_frame(self, img: np.ndarray) -> Dict:
         """处理单帧图像"""
         if not self.seat_rois:
             return {"status": "waiting_calibration", "msg": "请先完成标定"}
 
-        nparr = np.frombuffer(frame_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         self.frame_queue.put(img)
         
         # 1. 检测发言状态
@@ -182,6 +180,7 @@ class GGDVisionService:
             self.coordinator.record_vision_state(res)
         
         return {
+            "type": "processed_frame",
             "active_seat": speaker_id,
             "speaker_name": speaker_name
         }

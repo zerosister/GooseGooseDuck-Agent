@@ -9,11 +9,13 @@ import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.api.vision_router import router as vision_router
-from backend.app.services.audio_service.audio_capture import AudioCaptureService 
+from backend.app.api.my_router import router as my_router
+from backend.app.services.audio_service.audio_capture import AudioCaptureService
+from backend.app.services.video_frame_capture import VideoFrameCaptureService
 from backend.app.services.vision_ocr import GGDVisionService
 from backend.app.core.ggd_coordinator import GGDCoordinator
 from backend.utils.logger import log
+from backend.utils.config_loader import config
 
 # 1. 定义生命周期管理
 @asynccontextmanager
@@ -21,9 +23,14 @@ async def lifespan(app: FastAPI):
     # --- 【启动阶段】 ---
     log.success("=== GGD Agent Starting Up ===")
     
-    # 初始化视觉服务
+    # 初始化视觉分析服务
     vision_service = GGDVisionService()
     app.state.vision_service = vision_service
+
+    # 初始化视频帧捕获服务
+    frame_capture_service = VideoFrameCaptureService(config.vision.mode, config.vision.target, vision_service=vision_service)
+    app.state.frame_capture_service = frame_capture_service
+    frame_capture_service.start()
 
     # 启动协调器
     coordinator = GGDCoordinator(vision_service)
@@ -45,6 +52,9 @@ async def lifespan(app: FastAPI):
     yield  # --- 【运行阶段】 ---
     
     # --- 【关闭阶段】 ---
+    await coordinator.stop() # 停止协调器
+    vision_service.stop() # 停止视觉服务
+    frame_capture_service.stop() # 停止视频帧捕获服务
     log.warning("=== GGD Agent Shutting Down ===")
     log.info("Stopping AudioCaptureService...")
     
@@ -72,7 +82,7 @@ app.add_middleware(
 )
 
 # 4. 注册视觉分析路由
-app.include_router(vision_router, prefix="/api/v1", tags=["vision"])
+app.include_router(my_router, prefix="/api/v1", tags=["vision"])
 
 @app.get("/health")
 async def health_check():

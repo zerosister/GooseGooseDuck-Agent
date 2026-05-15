@@ -38,8 +38,8 @@ class ModelConfig(BaseModel):
     compute_type: str
 
 class VisionConfig(BaseModel):
-    fps: int
-    roi_regions: List[List[int]]
+    mode: str
+    target: str
 
 class AppConfig(BaseModel):
     server: ServerConfig

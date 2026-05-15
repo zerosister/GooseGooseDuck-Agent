@@ -38,6 +38,9 @@ goosegooseduck-agent/
 - 音频采集： 
   - soundcard（WASAPI Loopback）
   - Silero VAD（语音活动检测，有声音才进行录制）
+- 视频帧采集： 
+  - MSS（Multiple Screen Shot）
+  - pygetwindow（窗口捕获）
 - 实时音轨分析：
   - ASR（语音转文字）：Faster-Whisper，设备：CPU
   - 声纹识别：Wespeaker，设备：CPU

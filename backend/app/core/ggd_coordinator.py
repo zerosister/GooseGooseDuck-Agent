@@ -6,9 +6,10 @@ from collections import deque
 from backend.utils.logger import log
 import asyncio
 from backend.app.core.ws_manager import ws_manager
+from concurrent.futures import ThreadPoolExecutor
 
 class GGDCoordinator:
-    def __init__(self, vision_service, history_limit=200):
+    def __init__(self, vision_service, loop=None, history_limit=200):
         self.vision = vision_service
         # 视觉快照队列，保存过去一段时间的画面状态
         self.vision_history = deque(maxlen=history_limit)
@@ -17,6 +18,17 @@ class GGDCoordinator:
         # 聚合状态追踪
         self.last_speaker_id = -1  # 初始设为不存在的 ID
         self.current_session = None
+
+        # 为了不阻碍 audio_capture 线程，构建一个任务队列
+        # 保存主事件循环引用
+        self.loop = loop or asyncio.get_event_loop()
+        self.task_queue = asyncio.Queue()
+
+        # 确立最大线程数目
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+        # 开启聚合任务线程
+        self.worker_task = self.loop.create_task(self.process_task())
 
     def record_vision_state(self, res):
         """由 GGDVisionService 每秒/每帧调用"""
@@ -27,29 +39,59 @@ class GGDCoordinator:
         })
 
     def on_audio_result(self, text: str, start_time: float, duration: float, asr_spk: str):
+        """仅仅是把任务塞进异步队列，极速返回，不阻塞音频线程"""
+        data = {
+            "text": text,
+            "start_time": start_time,
+            "duration": duration,
+            "asr_spk": asr_spk
+        }
+        self.loop.call_soon_threadsafe(
+            self.task_queue.put_nowait, 
+            data
+        )
+    
+    async def process_task(self):
         """处理 ASR 结果并根据 Speaker ID 聚合文本"""
-        # 1. 判定说话人 (优先级：UI > HSV > Audio)
-        speaker_info = self._determine_speaker(start_time, duration, asr_spk)
-        sid = speaker_info["seat_id"]
-        
-        # 2. 聚合判定：如果 Speaker 未变，则在原文后追加 4 个空格和新文本
-        if sid == self.last_speaker_id and self.current_session:
-            self.current_session["content"] += f"    {text}"
-            self.current_session["type"] = "update"
-        else:
-            # 说话人变更或首次说话，开启新条目
-            self.current_session = {
-                "type": "new",
-                "id": int(time.time() * 1000),
-                "timestamp": round(start_time, 2),
-                "seat_id": sid,
-                "name": speaker_info["name"],
-                "content": text,
-                "method": speaker_info["method"]
-            }
-        
-        self.last_speaker_id = sid
-        self._dispatch_result(self.current_session)
+        log.info("GGD 协调器启动说话人聚合任务...")
+        while True:
+            # 等待队列中的新结果
+            item = await self.task_queue.get()
+
+            try:
+                # 1. 判定说话人 (优先级：UI > HSV > Audio)
+                speaker_info = await self.loop.run_in_executor(
+                    self.executor,
+                    self._determine_speaker,
+                    item["start_time"],
+                    item["duration"],
+                    item["asr_spk"]
+                )
+                sid = speaker_info["seat_id"]
+                
+                # 2. 聚合判定：如果 Speaker 未变，则在原文后追加 4 个空格和新文本
+                if sid == self.last_speaker_id and self.current_session:
+                    self.current_session["content"] += f"    {item['text']}"
+                    self.current_session["type"] = "update"
+                else:
+                    # 说话人变更或首次说话，开启新条目
+                    self.current_session = {
+                        "type": "new",
+                        "id": int(time.time() * 1000),
+                        "timestamp": round(item["start_time"], 2),
+                        "seat_id": sid,
+                        "name": speaker_info["name"],
+                        "content": item["text"],
+                        "method": speaker_info["method"]
+                    }
+                
+                # 3. 发送聚合结果
+                await self._dispatch_result(self.current_session)
+            except Exception as e:
+                log.error(f"GGD 协调器处理任务异常: {e}")
+            finally:
+                # 4. 标记完成
+                self.task_queue.task_done()
 
     def _determine_speaker(self, start_ts: float, duration: float, asr_spk: str) -> Dict:
         """
@@ -79,17 +121,26 @@ class GGDCoordinator:
         # --- P2: Audio Fallback ---
         return {"seat_id": None, "name": f"Unknown({asr_spk})", "method": "audio_engine"}
     
-    def _dispatch_result(self, payload: dict):
-        """分发结果至 WebSocket"""
-        log.success(f"Final JSON Output: {payload['name']} - {payload['content'][:15]}...")
-        
-        # 获取当前运行的事件循环
+    async def _dispatch_result(self, payload: dict):
+        """分发结果至 WebSocket（异步）"""
+        log.success(f"{payload['seat_id']} -{payload['name']} 发言：{payload['content'][:15]}...")
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 在正在运行的 loop 中安全地创建异步任务
-                asyncio.run_coroutine_threadsafe(ws_manager.broadcast(payload), loop)
-            else:
-                log.warning("事件循环未运行，无法发送消息")
+            await ws_manager.broadcast(payload)
         except Exception as e:
-            log.error(f"协调器推送消息异常: {e}")
+            log.error(f"WS推送消息异常: {e}")
+
+    async def stop(self):
+        """停止协调器"""
+        log.info("GGD 协调器停止运行...")
+
+        # 1. 取消异步的 Worker 任务
+        if self.worker_task:
+            self.worker_task.cancel()
+            try:
+                await self.worker_task
+            except asyncio.CancelledError:
+                log.info("GGD 协调器已停止运行。")
+        
+        # 2. 关闭线程池
+        self.executor.shutdown(wait=True)
+        log.success("GGD 协调器线程池已关闭")

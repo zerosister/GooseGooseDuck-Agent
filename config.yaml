@@ -32,7 +32,6 @@ models:
   ocr_model_dir: "backend/models/paddle_ocr"
   compute_type: "int8" # CPU 优化
 
-vision:
-  fps: 5
-  roi_regions: # 鹅鸭杀头像高亮区域坐标示例
-    - [100, 200, 50, 50]
+vision:                          # 视频帧获取配置
+  mode: "window"
+  target: "媒体播放器"

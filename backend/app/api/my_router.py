@@ -2,6 +2,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Body
 from backend.utils.logger import log
 from backend.app.core.ws_manager import ws_manager # 直接导入单例
 import json
+import cv2
+import base64
 
 router = APIRouter()
 
@@ -12,31 +14,31 @@ async def get_service_status():
 @router.websocket("/ws/stream")
 async def vision_websocket(websocket: WebSocket):
     """
-    视觉流双向通信：
-    1. 通过单例 ws_manager 统一管理连接
-    2. 接收视频帧并实时返回 HSV 检测结果 (用于前端点亮网格)
+    视觉推流 WebSocket 接口
+    1. 触发发送视频帧
+    2. 定时发送说话人信息
     """
     await ws_manager.connect(websocket) # 使用全局单例
-    vision_service = websocket.app.state.vision_service
 
     try:
         while True:
             # 1. 接收视频帧字节流
-            data = await websocket.receive_bytes()
-            
-            # 2. 视觉处理 (同步执行，确保响应速度)
-            result = vision_service.process_frame(data)
-            
-            # 3. 立即返回视觉反馈
-            # 添加 type 字段区分“视觉状态”和“语音文本”
-            await websocket.send_json({
-                "type": "processed_frame",
-                "active_seat": result.get("active_seat"),
-                "speaker_name": result.get("speaker_name")
-            })
-            
+            data = await websocket.receive_json()
+
+            if data.get("type") == "request_capture_frame":
+                # 前端请求当前视频帧用于标定展示
+                capture_service = websocket.app.state.frame_capture_service
+                frame = capture_service.get_latest_frame()
+                if frame is not None:
+                    # 编码为 base64 发回给前端
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    base64_str = base64.b64encode(buffer).decode('utf-8')
+                    await websocket.send_json({
+                        "type": "calibration_frame",
+                        "image": f"data:image/jpeg;base64,{base64_str}"
+                    })
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+            ws_manager.disconnect(websocket)
     except Exception as e:
         log.error(f"WebSocket 异常: {e}")
         ws_manager.disconnect(websocket)
