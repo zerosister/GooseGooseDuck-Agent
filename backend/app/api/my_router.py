@@ -1,6 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Body
 from backend.utils.logger import log
 from backend.app.core.ws_manager import ws_manager # 直接导入单例
+from backend.utils.config_loader import get_public_config, save_public_config
 import json
 import cv2
 import base64
@@ -10,6 +11,27 @@ router = APIRouter()
 @router.get("/status")
 async def get_service_status():
     return {"status": "online", "agent": "GGD_Perception_Agent"}
+
+@router.get("/config")
+async def get_config():
+    return {
+        "status": "success",
+        "config": get_public_config()
+    }
+
+@router.put("/config")
+async def update_config(config: dict = Body(...)):
+    try:
+        saved_config = save_public_config(config)
+        return {
+            "status": "success",
+            "config": saved_config,
+            "restart_required": True,
+            "message": "配置已保存，重启应用后生效。"
+        }
+    except Exception as e:
+        log.error(f"保存应用配置失败: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.websocket("/ws/stream")
 async def vision_websocket(websocket: WebSocket):

@@ -45,3 +45,5 @@ backend/tests/
 
 **/__pycache__/**
 backend/models/
+
+roi_config.json

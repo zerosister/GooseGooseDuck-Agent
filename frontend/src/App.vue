@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, provide, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, provide, watch } from 'vue'
 import ScreenCapture from './components/ScreenCapture.vue'
 import SpeechLog from './components/SpeechLog.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import { wsUrl } from './lib/api'
 
 // --- 接口定义 ---
 interface IElectronAPI {
@@ -17,6 +19,7 @@ const screenCaptureRef = ref<InstanceType<typeof ScreenCapture> | null>(null)
 const isConnected = ref(false)
 const showVision = ref(false)
 const showLog = ref(true)
+const showSettings = ref(false)
 let socket: WebSocket | null = null
 
 // --- 核心控制：穿透逻辑 ---
@@ -41,7 +44,7 @@ const startIgnore = () => {
  */
 const syncIgnoreState = () => {
   // 如果“视觉”和“日志”都关了，窗口应该进入穿透模式（导航栏通过 mouseenter 会自己变回实体）
-  if (!showVision.value && !showLog.value) {
+  if (!showVision.value && !showLog.value && !showSettings.value) {
     startIgnore()
   } else {
     // 如果有面板开着，默认先不穿透，等鼠标移出面板时由 mouseleave 触发 startIgnore
@@ -50,14 +53,14 @@ const syncIgnoreState = () => {
 }
 
 // 1. 监听面板显示状态变化
-watch([showVision, showLog], () => {
+watch([showVision, showLog, showSettings], () => {
   syncIgnoreState()
 })
 
 // --- WebSocket 逻辑 ---
 const connectService = () => {
   if (socket && (socket.readyState <= 1)) return
-  socket = new WebSocket("ws://localhost:8000/api/v1/ws/stream")
+  socket = new WebSocket(wsUrl('/api/v1/ws/stream'))
   socket.onopen = () => { isConnected.value = true; screenCaptureRef.value?.requestNewFrame() }
   socket.onmessage = (e) => {
     try {
@@ -93,8 +96,9 @@ const handleWindowResize = (contentSize: { width: number, height: number }) => {
   const NAV_HEIGHT = 60; 
   const MARGIN = 20;
   const SPEECH_LOG_WIDTH = showLog.value ? 330 : 0; // 如果日志开启，也要算进去
+  const SETTINGS_WIDTH = showSettings.value ? 330 : 0;
 
-  const targetWidth = Math.max(contentSize.width + SPEECH_LOG_WIDTH + MARGIN, 200);
+  const targetWidth = Math.max(contentSize.width + SPEECH_LOG_WIDTH + SETTINGS_WIDTH + MARGIN, 200);
   const targetHeight = contentSize.height + NAV_HEIGHT + MARGIN;
 
   // 调用 Electron 的窗口调整接口
@@ -125,6 +129,7 @@ const handleWindowResize = (contentSize: { width: number, height: number }) => {
 
       <button @click="showVision = !showVision" :class="{ active: showVision }">视觉</button>
       <button @click="showLog = !showLog" :class="{ active: showLog }">日志</button>
+      <button @click="showSettings = !showSettings" :class="{ active: showSettings }">设置</button>
       
       <button class="btn-min" @click="electron?.send('window-min')">一</button>
     </nav>
@@ -149,7 +154,15 @@ const handleWindowResize = (contentSize: { width: number, height: number }) => {
         <SpeechLog ref="speechLogRef" />
       </div>
 
-      <div v-if="!showVision && !showLog" class="ghost-sensor"></div>
+      <div
+        v-if="showSettings"
+        class="resizable-box settings-box"
+        @mouseenter="stopIgnore"
+      >
+        <SettingsPanel @close="showSettings = false" />
+      </div>
+
+      <div v-if="!showVision && !showLog && !showSettings" class="ghost-sensor"></div>
     </main>
   </div>
 </template>
@@ -241,6 +254,7 @@ body {
 }
 
 .log-box { width: 320px; height: 450px; }
+.settings-box { width: 320px; }
 .vision-box { min-width: 200px; min-height: 150px; }
 .ghost-sensor { width: 1px; height: 1px; pointer-events: none; }
 .divider { width: 1px; height: 14px; background: #444; }

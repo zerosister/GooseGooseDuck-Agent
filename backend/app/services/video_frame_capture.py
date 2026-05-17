@@ -13,7 +13,7 @@ from backend.app.core.ws_manager import ws_manager
 import asyncio
 
 class VideoFrameCaptureService:
-    def __init__(self, mode: Literal["adb", "window"] = "window", target: str = "", vision_service=None, loop: asyncio.AbstractEventLoop = None):
+    def __init__(self, mode: Literal["adb", "window"] = "window", target: str = "", vision_service=None, loop: asyncio.AbstractEventLoop = None, fps_limit: int = 2):
         """
         :param mode: "adb" (模拟器) 或 "window" (播放器窗口)
         :param target: 如果是 window 模式，传入窗口标题关键词；如果是 adb 模式，传入 adb 连接字符串
@@ -29,7 +29,7 @@ class VideoFrameCaptureService:
         self._target_hwnd = None
         
         # 性能控制,默认 1s 截取 2帧
-        self.fps_limit = 2
+        self.fps_limit = fps_limit
         self.interval = 1.0 / self.fps_limit
 
         # 注入触发视觉处理逻辑

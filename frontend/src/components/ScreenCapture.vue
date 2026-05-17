@@ -59,6 +59,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, inject, type CSSProperties } from 'vue';
+import { apiFetch } from '@/lib/api';
 
 // 1. 声明 emit
 const emit = defineEmits(['update-size']);
@@ -148,7 +149,7 @@ const requestNewFrame = () => {
 
 const fetchCurrentConfig = async () => {
   try {
-    const res = await fetch("http://localhost:8000/api/v1/calibration/current");
+    const res = await apiFetch("/api/v1/calibration/current");
     const data = await res.json();
     if (data.config_preview) previewRois.value = data.config_preview;
   } catch (e) { console.error("加载配置失败", e); }
@@ -239,7 +240,7 @@ const retryStep = () => { hasDrawn.value = false; tempBox.value = null; };
 
 const submitCalibration = async () => {
   try {
-    const res = await fetch("http://localhost:8000/api/v1/calibrate", {
+    const res = await apiFetch("/api/v1/calibrate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(results.value)

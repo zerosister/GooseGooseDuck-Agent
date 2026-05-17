@@ -19,7 +19,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import axios from 'axios';
+import { apiFetch } from '@/lib/api';
 
 const props = defineProps(['active', 'canvasWidth', 'canvasHeight']);
 const emit = defineEmits(['close']);
@@ -65,7 +65,11 @@ const onMouseUp = async () => {
     step.value++;
   } else {
     // 标定结束，提交到后端
-    await axios.post('http://localhost:8000/api/v1/calibrate', results.value);
+    await apiFetch('/api/v1/calibrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(results.value)
+    });
     alert("标定完成！后端已重载坐标。");
     emit('close');
   }

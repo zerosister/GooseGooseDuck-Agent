@@ -1,7 +1,7 @@
 import yaml
 from backend.utils.pathtool import get_abs_path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Any, Dict, Optional
 
 class ServerConfig(BaseModel):
     host: str
@@ -40,6 +40,7 @@ class ModelConfig(BaseModel):
 class VisionConfig(BaseModel):
     mode: str
     target: str
+    fps_limit: int
 
 class AppConfig(BaseModel):
     server: ServerConfig
@@ -49,10 +50,62 @@ class AppConfig(BaseModel):
     vision: VisionConfig
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:
-    config_path = get_abs_path(config_path)
+    config_path = get_config_path(config_path)
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return AppConfig(**data)
+
+def get_config_path(config_path: str = "config.yaml"):
+    return get_abs_path(config_path)
+
+def _model_to_dict(model: BaseModel) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+def get_public_config() -> Dict[str, Any]:
+    current = load_config()
+    return {
+        "server": {
+            "host": current.server.host,
+            "port": current.server.port,
+        },
+        "vision": {
+            "mode": current.vision.mode,
+            "target": current.vision.target,
+            "fps_limit": current.vision.fps_limit,
+        },
+    }
+
+def save_public_config(payload: Dict[str, Any], config_path: str = "config.yaml") -> Dict[str, Any]:
+    path = get_config_path(config_path)
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    raw.setdefault("server", {})
+    raw.setdefault("vision", {})
+
+    if "server" in payload:
+        server = payload["server"] or {}
+        if "host" in server:
+            raw["server"]["host"] = str(server["host"])
+        if "port" in server:
+            raw["server"]["port"] = int(server["port"])
+
+    if "vision" in payload:
+        vision = payload["vision"] or {}
+        if "mode" in vision:
+            raw["vision"]["mode"] = str(vision["mode"])
+        if "target" in vision:
+            raw["vision"]["target"] = str(vision["target"])
+        if "fps_limit" in vision:
+            raw["vision"]["fps_limit"] = int(vision["fps_limit"])
+
+    validated = AppConfig(**raw)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(_model_to_dict(validated), f, allow_unicode=True, sort_keys=False)
+
+    return get_public_config()
 
 # 全局单例
 config = load_config()

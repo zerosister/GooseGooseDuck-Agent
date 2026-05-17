@@ -28,7 +28,11 @@ async def lifespan(app: FastAPI):
     app.state.vision_service = vision_service
 
     # 初始化视频帧捕获服务
-    frame_capture_service = VideoFrameCaptureService(config.vision.mode, config.vision.target, vision_service=vision_service)
+    frame_capture_service = VideoFrameCaptureService(
+        config.vision.mode, 
+        config.vision.target, 
+        vision_service=vision_service,
+        fps_limit=config.vision.fps_limit)
     app.state.frame_capture_service = frame_capture_service
     frame_capture_service.start()
 
@@ -98,8 +102,8 @@ if __name__ == "__main__":
     
     uvicorn.run(
         "main:app", 
-        host="0.0.0.0", 
-        port=8000, 
+        host=config.server.host, 
+        port=config.server.port, 
         loop="auto", 
         http="httptools",
         workers=1 # 处理音频流这种有状态的服务时，建议先使用单 worker 避免资源抢占
