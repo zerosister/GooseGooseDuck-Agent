@@ -197,7 +197,7 @@ class GGDVisionService:
         }
     
     def _get_seat_rois(self, img: np.ndarray) -> Optional[List[Tuple]]:
-        """座位网格推导逻辑（耗时操作）[cite: 3]"""
+        """已弃用：座位网格推导逻辑（耗时操作）[cite: 3]"""
         
         def preprocess_img(img_bgr: np.ndarray) -> np.ndarray:
             '''

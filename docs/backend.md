@@ -92,6 +92,21 @@ res = {
     "ui_text": self.current_ui_text,
 }
 ```
+- 对于参与游戏人数的热更新，引入 `threading.RLock()` 锁。
+```python
+# __init__()
+        self.seat_num = 13
+        self._seat_lock = threading.RLock()
+
+# set_seat_num() 需要获取这个线程锁才能进行修改
+with self._seat_lock:
+            self.seat_num = max(1, min(int(num), _GGD_SEAT_COUNT))
+
+# _ocr_scan_loop() 对于获取玩家座位数的函数，需要获取这个线程锁才能进行读取
+with self._seat_lock:
+    seat_num = self.seat_num
+```
+
 
 # [ggd_coordinator.py](../backend/app/core/ggd_coordinator.py)
 
@@ -157,3 +172,5 @@ app.add_middleware(
 app.include_router(vision_router, prefix="/api/v1")
 ```
 这意味着 vision_router 内部定义的所有路径都会自动带上这个前缀。它们的关系是父子嵌套关系，如`/api/v1/ws/stream`和`/api/v1/status`
+
+- `_apply_runtime_config` 对于运行时配置热更新。从前端获得的某些配置（如监听模式，玩家人数等），可以实时的更改。
