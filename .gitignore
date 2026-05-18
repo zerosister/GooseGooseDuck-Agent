@@ -47,3 +47,9 @@ backend/tests/
 backend/models/
 
 roi_config.json
+.venv/
+
+# 打包文件
+*.spec
+build/
+dist/

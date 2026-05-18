@@ -4,14 +4,13 @@ pydantic
 soundcard
 soundfile 
 numpy
-faster-whisper
-onnxruntime    # 可以不用下载 silero-vad，仓库实现已经参考了官方库使用
+onnxruntime    # a choice to silero-vad
 fastapi
 uvicorn[standard]
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
-paddlepaddle==3.2.0
-paddleocr
+rapidocr
 mss
 pygetwindow
 pure-python-adb 
 pywin32
+sherpa-onnx

@@ -2,9 +2,44 @@
 
 准备环境：
 - Windows 11 家庭版
-- Python 3.11
+- Python 3.11 或 Python 3.12
 
-目录结构：
+## 快速启动
+
+克隆仓库：
+```shell
+git clone https://github.com/zerosister/GooseGooseDuck-Agent.git
+cd GooseGooseDuck-Agent
+git checkout input-processing
+```
+
+windows 下创建后端虚拟环境：
+```shell
+py -3.12 -m venv .venv
+./.venv/Scripts/Activate.ps1
+pip install -r backend/requirements.txt
+```
+
+准备前端环境并启动
+```shell
+cd frontend
+npm install
+npm run dev
+```
+
+**新开一个**终端使用 electron 连接前端：
+```shell
+cd frontend
+npx electron .
+```
+
+**新开一个**终端启动后端服务：
+```shell
+python backend/main.py
+```
+
+
+## 目录结构
 ```
 goosegooseduck-agent/
 ├── backend/
