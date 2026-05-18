@@ -53,3 +53,6 @@ roi_config.json
 *.spec
 build/
 dist/
+frontend/dist-frontend/
+frontend/release/
+frontend/.npm-cache/

@@ -8,11 +8,15 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 export default defineConfig({
   plugins: [
     vue(),
-    vueDevTools(),
+    // vueDevTools(),
   ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
+  base: './',    // 确保打包后的静态资源引入为相对路径
+  build: {
+    outDir: "dist-frontend"
+  }
 })

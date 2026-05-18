@@ -102,7 +102,7 @@ if __name__ == "__main__":
     log.info("Launching Integrated GGD Agent Server...")
     
     uvicorn.run(
-        "main:app", 
+        app, 
         host=config.server.host, 
         port=config.server.port, 
         loop="auto", 

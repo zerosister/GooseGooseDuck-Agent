@@ -154,8 +154,16 @@ function createWindow () {
     });
     mainWindow = win;
 
-    // 加载 Vite 开发服务器地址
-    win.loadURL('http://localhost:5173');
+    // 修改加载逻辑
+    if (app.isPackaged) {
+        // 🌟 生产环境：加载打包好的前端 HTML 文件
+        win.loadFile(path.join(__dirname, 'dist-frontend/index.html')); 
+        // ⚠️ 注意：这里的相对路径取决于你 main.js 实际被打包后的位置，
+        // 如果是用 Vite 编译主进程，确保它能正确指向 dist-frontend 目录。
+    } else {
+        // 开发环境：加载 Vite 起的本地服务器
+        win.loadURL('http://localhost:5173');
+    }
     
     // 监听来自前端的最小化请求
     ipcMain.on('window-min', () => {
