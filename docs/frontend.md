@@ -28,3 +28,18 @@
 
 所以采用在后端抓取视频帧的方式，可以解决以上两个问题。
 前端只负责展现即可。
+
+# 核心架构
+[App.vue](../frontend/src/App.vue) 是前端总控组件，负责：
+- 建立 WebSocket：`/api/v1/ws/stream`
+- 根据消息类型分发给视觉面板和语音日志
+- 控制三个面板显示：视觉、日志、设置
+- 控制 Electron 窗口鼠标穿透和大小调整
+
+子- 组件通过 ref + defineExpose 暴露方法给父组件调用，比如 `ScreenCapture.handleVisionData()`、`SpeechLog.handleIncomingSpeech()`。
+`provide('ws_context', ...)` 把 WebSocket 发送能力下发给组件，[ScreenCapture.vue](../frontend/src/components/ScreenCapture.vue) 用它发送 `request_capture_frame`。
+
+## 三个重要组件
+- [ScreenCapture.vue](../frontend/src/components/ScreenCapture.vue) ：视觉面板。用 canvas 显示后端传来的图像帧，支持缩放、显示 ROI 网格、拖拽标定座位区域，并通过 /api/v1/calibrate 保存标定。
+- [SpeechLog.vue](../frontend/src/components/SpeechLog.vue)：实时语音日志。维护 logs 列表，处理 new/update/processed_frame，显示当前视觉锁定的发言座位。
+- [SettingsPanel.vue](../frontend/src/components/SettingsPanel.vue)：设置面板。读取和保存后端配置，包括 host、port、采集模式、目标地址、FPS 限制。
