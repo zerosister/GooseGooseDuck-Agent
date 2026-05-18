@@ -4,6 +4,8 @@
 - Windows 11 家庭版
 - Python 3.11 或 Python 3.12
 
+百度网盘：https://pan.baidu.com/s/1wyCZI6aRAUxDwzJQ4En_8w?pwd=b6j5 提取码: b6j5
+
 ## 快速启动
 
 克隆仓库：
