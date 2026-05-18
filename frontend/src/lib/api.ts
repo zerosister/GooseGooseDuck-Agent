@@ -11,6 +11,9 @@ export type PublicConfig = {
     target: string
     fps_limit: number
   }
+  game_setting: {
+    seat_num: number
+  }
 }
 
 export const getBackendPort = () => {

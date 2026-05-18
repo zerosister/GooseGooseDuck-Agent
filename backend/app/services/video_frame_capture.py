@@ -23,6 +23,7 @@ class VideoFrameCaptureService:
         self.is_running = False
         self.latest_frame = None
         self.thread = None
+        self._config_lock = threading.RLock()
         
         # 缓存的资源
         self._adb_device = None
@@ -113,7 +114,10 @@ class VideoFrameCaptureService:
             frame = None
 
             try:
-                if self.mode == "adb":
+                with self._config_lock:
+                    mode = self.mode
+
+                if mode == "adb":
                     if not self._adb_device:
                         self._init_adb()
                     else:
@@ -123,7 +127,7 @@ class VideoFrameCaptureService:
                             img_array = np.frombuffer(screenshot, dtype='uint8')
                             frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-                elif self.mode == "window":
+                elif mode == "window":
                     if not self._target_hwnd or not win32gui.IsWindow(self._target_hwnd):
                         self._init_window()
                     else:
@@ -146,7 +150,9 @@ class VideoFrameCaptureService:
 
             # 控制 FPS
             elapsed = time.perf_counter() - start_time
-            sleep_time = max(0, self.interval - elapsed)
+            with self._config_lock:
+                interval = self.interval
+            sleep_time = max(0, interval - elapsed)
             time.sleep(sleep_time)
 
     def _capture_window_logic(self):
@@ -190,6 +196,22 @@ class VideoFrameCaptureService:
             self.thread = threading.Thread(target=self._capture_loop, daemon=True)
             self.thread.start()
             log.info("视频帧捕获服务已启动")
+
+    def update_config(self, mode: str, target: str, fps_limit: int):
+        fps_limit = max(1, int(fps_limit))
+        with self._config_lock:
+            source_changed = self.mode != mode or self.target != target
+            self.mode = mode
+            self.target = target
+            self.fps_limit = fps_limit
+            self.interval = 1.0 / fps_limit
+
+            if source_changed:
+                self._adb_device = None
+                self._target_hwnd = None
+                self.latest_frame = None
+
+        log.info(f"视频采集配置已热更新: mode={mode}, target={target}, fps_limit={fps_limit}")
 
     def stop(self):
         self.is_running = False

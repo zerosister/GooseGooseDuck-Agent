@@ -32,3 +32,5 @@ vision:
   mode: window
   target: 媒体播放器
   fps_limit: 1
+game_setting:
+  seat_num: 13

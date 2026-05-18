@@ -19,15 +19,36 @@ async def get_config():
         "config": get_public_config()
     }
 
+def _apply_runtime_config(request: Request, saved_config: dict):
+    vision_config = saved_config.get("vision", {})
+    frame_capture_service = getattr(request.app.state, "frame_capture_service", None)
+    if frame_capture_service:
+        frame_capture_service.update_config(
+            vision_config.get("mode"),
+            vision_config.get("target"),
+            vision_config.get("fps_limit"),
+        )
+
+    game_setting = saved_config.get("game_setting", {})
+    vision_service = getattr(request.app.state, "vision_service", None)
+    if vision_service and "seat_num" in game_setting:
+        vision_service.set_seat_num(game_setting["seat_num"])
+
 @router.put("/config")
-async def update_config(config: dict = Body(...)):
+async def update_config(request: Request, config: dict = Body(...)):
     try:
+        current_config = get_public_config()
         saved_config = save_public_config(config)
+        _apply_runtime_config(request, saved_config)
+        restart_required = (
+            current_config.get("server", {}).get("host") != saved_config.get("server", {}).get("host")
+            or current_config.get("server", {}).get("port") != saved_config.get("server", {}).get("port")
+        )
         return {
             "status": "success",
             "config": saved_config,
-            "restart_required": True,
-            "message": "配置已保存，重启应用后生效。"
+            "restart_required": restart_required,
+            "message": "配置已保存，运行时配置已更新。" if not restart_required else "配置已保存，采集和游戏设置已热更新；端口变更需要重启应用后生效。"
         }
     except Exception as e:
         log.error(f"保存应用配置失败: {e}")

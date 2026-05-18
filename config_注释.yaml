@@ -36,3 +36,6 @@ vision:                          # 视频帧获取配置
   mode: "adb"                 # window 表示截取媒体播放器，adb表示截取手机屏幕
   target: "127.0.0.1:16384"          # window模式下，填写“媒体播放器”，adb模式下填写 "127.0.0.1:16384"
   fps_limit: 1               # 视频帧获取频率
+
+game_setting:                 # 有关游戏内部的设置
+  seat_num: 13                # 参与游戏的玩家个数

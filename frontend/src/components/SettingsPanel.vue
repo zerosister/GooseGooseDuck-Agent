@@ -34,6 +34,11 @@
           <span>FPS 限制</span>
           <input v-model.number="draft.vision.fps_limit" type="number" min="1" max="30" />
         </label>
+
+        <label>
+          <span>游戏人数</span>
+          <input v-model.number="draft.game_setting.seat_num" type="number" min="1" max="15" />
+        </label>
       </fieldset>
 
       <p v-if="message" :class="['message', messageType]">{{ message }}</p>
@@ -58,7 +63,6 @@ const loading = ref(false)
 const saving = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
-const deviceIndexText = ref('')
 
 const draft = reactive<PublicConfig>({
   server: {
@@ -70,6 +74,9 @@ const draft = reactive<PublicConfig>({
     target: '127.0.0.1:16384',
     fps_limit: 1,
   },
+  game_setting: {
+    seat_num: 13,
+  },
 })
 
 const applyConfig = (config: PublicConfig) => {
@@ -78,6 +85,7 @@ const applyConfig = (config: PublicConfig) => {
   draft.vision.mode = config.vision.mode
   draft.vision.target = config.vision.target
   draft.vision.fps_limit = config.vision.fps_limit
+  draft.game_setting.seat_num = config.game_setting?.seat_num ?? 13
 }
 
 const showMessage = (text: string, type: 'success' | 'error' = 'success') => {
@@ -103,7 +111,6 @@ const loadConfig = async () => {
 const saveConfig = async () => {
   saving.value = true
   showMessage('')
-  const deviceIndex = deviceIndexText.value.trim()
   const payload: PublicConfig = {
     server: {
       host: draft.server.host,
@@ -113,6 +120,9 @@ const saveConfig = async () => {
       mode: draft.vision.mode,
       target: draft.vision.target,
       fps_limit: Number(draft.vision.fps_limit),
+    },
+    game_setting: {
+      seat_num: Number(draft.game_setting.seat_num),
     },
   }
 
@@ -126,7 +136,7 @@ const saveConfig = async () => {
     if (data.status !== 'success') throw new Error(data.message || '保存配置失败')
     applyConfig(data.config)
     rememberBackendPort(data.config.server.port)
-    showMessage(data.message || '配置已保存，重启应用后生效。')
+    showMessage(data.message || '配置已保存，运行时配置已更新。')
   } catch (error) {
     showMessage(error instanceof Error ? error.message : '保存配置失败', 'error')
   } finally {
@@ -201,17 +211,6 @@ select {
   background: #202020;
   color: #eee;
   padding: 0 8px;
-}
-
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.checkbox-row input {
-  width: 15px;
-  height: 15px;
 }
 
 .message {

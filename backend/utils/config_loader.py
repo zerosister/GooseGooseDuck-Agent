@@ -42,12 +42,16 @@ class VisionConfig(BaseModel):
     target: str
     fps_limit: int
 
+class GameSettingConfig(BaseModel):
+    seat_num: int = Field(13, ge=1, le=15)
+
 class AppConfig(BaseModel):
     server: ServerConfig
     audio: AudioConfig
     asr: ASRConfig
     models: ModelConfig
     vision: VisionConfig
+    game_setting: GameSettingConfig = Field(default_factory=GameSettingConfig)
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:
     config_path = get_config_path(config_path)
@@ -75,6 +79,9 @@ def get_public_config() -> Dict[str, Any]:
             "target": current.vision.target,
             "fps_limit": current.vision.fps_limit,
         },
+        "game_setting": {
+            "seat_num": current.game_setting.seat_num,
+        },
     }
 
 def save_public_config(payload: Dict[str, Any], config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -84,6 +91,7 @@ def save_public_config(payload: Dict[str, Any], config_path: str = "config.yaml"
 
     raw.setdefault("server", {})
     raw.setdefault("vision", {})
+    raw.setdefault("game_setting", {})
 
     if "server" in payload:
         server = payload["server"] or {}
@@ -100,6 +108,11 @@ def save_public_config(payload: Dict[str, Any], config_path: str = "config.yaml"
             raw["vision"]["target"] = str(vision["target"])
         if "fps_limit" in vision:
             raw["vision"]["fps_limit"] = int(vision["fps_limit"])
+
+    if "game_setting" in payload:
+        game_setting = payload["game_setting"] or {}
+        if "seat_num" in game_setting:
+            raw["game_setting"]["seat_num"] = int(game_setting["seat_num"])
 
     validated = AppConfig(**raw)
     with open(path, "w", encoding="utf-8") as f:

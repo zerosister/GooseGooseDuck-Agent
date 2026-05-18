@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
     
     # 初始化视觉分析服务
     vision_service = GGDVisionService()
+    vision_service.set_seat_num(config.game_setting.seat_num)
     app.state.vision_service = vision_service
 
     # 初始化视频帧捕获服务

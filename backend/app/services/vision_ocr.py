@@ -30,6 +30,7 @@ class GGDVisionService:
 
         # 默认参与游戏人数
         self.seat_num = 13
+        self._seat_lock = threading.RLock()
 
         # 协调器实例，需要在 main.py 中注入
         self.coordinator : GGDCoordinator = None
@@ -66,7 +67,14 @@ class GGDVisionService:
             raise e
     
     def set_seat_num(self, num: int):
-        self.seat_num = num
+        with self._seat_lock:
+            self.seat_num = max(1, min(int(num), _GGD_SEAT_COUNT))
+            self.seat_names = {
+                seat: name
+                for seat, name in self.seat_names.items()
+                if seat <= self.seat_num
+            }
+        log.info(f"游戏人数已更新为 {self.seat_num}")
 
     def _load_roi_config(self):
         """从 JSON 加载标定数据并推导完整网格"""
@@ -133,8 +141,11 @@ class GGDVisionService:
                             self.current_ui_text = " ".join(res.txts)
 
                 # 2. 识别玩家 ID（如果还有座位没识别出来）
-                if len(self.seat_names) < self.seat_num:
-                    for i, (x, y, w, h) in enumerate(self.seat_rois, 1):
+                with self._seat_lock:
+                    seat_num = self.seat_num
+
+                if len(self.seat_names) < seat_num:
+                    for i, (x, y, w, h) in enumerate(self.seat_rois[:seat_num], 1):
                         if i in self.seat_names: continue
                         
                         # 截取名字区域（假设名字在卡片上半部分，取 ROI 的前 30%）
