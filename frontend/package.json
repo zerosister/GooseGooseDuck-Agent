@@ -11,9 +11,12 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "electron:serve": "electron .",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write --experimental-cli src/",
+    "start": "chcp 65001 && electron ."
   },
   "dependencies": {
+    "iconv-lite": "^0.7.2",
+    "picocolors": "^1.1.1",
     "vue": "^3.5.32",
     "vue-router": "^5.0.4"
   },
@@ -22,7 +25,7 @@
     "@types/node": "^24.12.2",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
-    "electron": "^42.0.1",
+    "electron": "^42.1.0",
     "npm-run-all2": "^8.0.4",
     "prettier": "3.8.3",
     "typescript": "~6.0.0",
@@ -32,5 +35,13 @@
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
+  },
+  "build": {
+    "extraResources": [
+      {
+        "from": "../dist/ggd-backend",
+        "to": "backend"
+      }
+    ]
   }
 }

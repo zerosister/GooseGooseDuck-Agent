@@ -30,7 +30,9 @@ npm run dev
 **新开一个**终端使用 electron 连接前端：
 ```shell
 cd frontend
-npx electron .
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"  # 加速下载
+# 设置临时环境变量，告诉 Electron,已经采用手动开后端模式
+$env:MANUAL_BACKEND="true"; npx electron .
 ```
 
 **新开一个**终端启动后端服务：

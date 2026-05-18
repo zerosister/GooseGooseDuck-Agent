@@ -9,6 +9,8 @@ from backend.app.core.ggd_coordinator import GGDCoordinator
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
 
 class AudioCaptureService:
     def __init__(self, coordinator: GGDCoordinator):
@@ -36,6 +38,37 @@ class AudioCaptureService:
         self.audio_queue = queue.Queue(maxsize=100) # 缓冲区
         self.running = False
 
+        # 初始化线程池
+        self.segment_executor = ThreadPoolExecutor(max_workers=2)
+        self.asr_executor = ThreadPoolExecutor(max_workers=1)
+        self.speaker_executor = ThreadPoolExecutor(max_workers=1)
+
+        # 初始化 ASR/speaker识别结果 信号量
+        self.segment_semaphore = threading.Semaphore(4)
+        self.result_lock = threading.Lock()
+    
+    def _process_segment_async(self, samples, precise_start_time, duration):
+        try:
+            asr_future = self.asr_executor.submit(self.asr_engine.transcribe, samples)
+            speaker_future = self.speaker_executor.submit(self.speaker_engine.identify, samples)
+
+            text = asr_future.result()
+            spk_name = speaker_future.result()
+
+            log.debug(
+                f"audio 说话人：{spk_name}，识别结果：{text}，"
+                f"物理时间戳：{precise_start_time}，持续时间：{duration}"
+            )
+
+            if self.coordinator:
+                with self.result_lock:
+                    self.coordinator.on_audio_result(text, precise_start_time, duration, spk_name)
+
+        except Exception as e:
+            log.exception(f"音频片段处理失败: {e}")
+        finally:
+            self.segment_semaphore.release()
+    
     def _processing_worker(self):
         """消费者线程：专门负责 VAD、ASR 和 Speaker ID"""
         while self.running:
@@ -54,15 +87,19 @@ class AudioCaptureService:
                     # 流开始时间 + (该段在音频流中的起始采样点 / 采样率)
                     precise_start_time = self.stream_start_wall_time + (segment.start / 16000.0)
                     duration = len(segment.samples) / 16000.0
-
-                    # 在这里执行耗时操作
-                    spk_name = self.speaker_engine.identify(segment.samples)
-                    text = self.asr_engine.transcribe(segment.samples)
                     
-                    log.debug(f"audio 说话人：{spk_name}，识别结果：{text}，物理时间戳：{precise_start_time}，持续时间：{duration}")
-                    # 向协调器发送结果
-                    if self.coordinator:
-                        self.coordinator.on_audio_result(text, precise_start_time, duration, spk_name)
+                    # 复制一份 samples
+                    samples = np.copy(segment.samples)
+
+                    if self.segment_semaphore.acquire(blocking=False):
+                        self.segment_executor.submit(
+                            self._process_segment_async,
+                            samples,
+                            precise_start_time,
+                            duration,
+                        )
+                    else:
+                        log.warning("音频片段处理任务积压，丢弃当前 segment")
 
                     self.vad.pop()
                 self.audio_queue.task_done()

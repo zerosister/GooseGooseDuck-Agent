@@ -42,6 +42,61 @@ silero VAD 的实现针对每一个`chunk`的大小都是有限制的，如果�
 
 - 解决方案：将音频采集线程作为主线程。Speaker识别与ASR放在子线程中。采用**生产者-消费者**模型 [audio_capture](../backend/app/services/audio_service/audio_capture.py)
 
+## Sherpa onnx 方案一 PLUS
+
+方案一代码:
+```python
+def _processing_worker(self):
+    """消费者线程：专门负责 VAD、ASR 和 Speaker ID"""
+    while self.running:
+        try:
+            # 设置超时避免死锁
+            samples = self.audio_queue.get(timeout=1)
+            self.vad.accept_waveform(samples)
+            
+            while not self.vad.empty():
+                segment = self.vad.front
+                if len(segment.samples) < 0.5 * 16000:
+                    self.vad.pop()
+                    continue
+                
+                # 计算物理时间戳：
+                # 流开始时间 + (该段在音频流中的起始采样点 / 采样率)
+                precise_start_time = self.stream_start_wall_time + (segment.start / 16000.0)
+                duration = len(segment.samples) / 16000.0
+
+                # 在这里执行耗时操作
+                spk_name = self.speaker_engine.identify(segment.samples)
+                text = self.asr_engine.transcribe(segment.samples)
+                
+                log.debug(f"audio 说话人：{spk_name}，识别结果：{text}，物理时间戳：{precise_start_time}，持续时间：{duration}")
+                # 向协调器发送结果
+                if self.coordinator:
+                    self.coordinator.on_audio_result(text, precise_start_time, duration, spk_name)
+
+                self.vad.pop()
+            self.audio_queue.task_done()
+        except queue.Empty:
+            continue
+```
+
+1. 会导致 `audio_queue` 经常处于满载状态,因为 vad 还在等待 speaker 识别和 ASR 两个耗时运算.
+2. 注意到 ASR 与 Speaker 并不存在顺序关系,可以并行.
+
+于是引出方案一 PLUS:
+
+```
+record_generator
+  -> audio_queue
+  -> VAD worker 只负责 accept_waveform + 切 segment
+  -> segment 后台任务
+       -> ASR executor
+       -> Speaker executor
+       -> 两个结果都回来后再 coordinator.on_audio_result()
+```
+通信则使用
+
+
 # 视频帧获取
 
 1. 对MUMU模拟器，因为虚拟安卓机可以采用 ADB（Android Debug Bridge）进行通信。所以截取到的屏幕一定是该窗口流信息，不会因为其他窗口置于顶层而受影响。
