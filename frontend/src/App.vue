@@ -15,6 +15,7 @@ const electron = (window as any).electronAPI as IElectronAPI
 // --- 组件引用与状态 ---
 const speechLogRef = ref<InstanceType<typeof SpeechLog> | null>(null)
 const screenCaptureRef = ref<InstanceType<typeof ScreenCapture> | null>(null)
+const navRef = ref<HTMLElement | null>(null)
 
 const isConnected = ref(false)
 const showVision = ref(false)
@@ -86,9 +87,18 @@ onMounted(() => {
   syncIgnoreState()
 
   // 如果你在 main.js 中转发了窗口恢复事件，可以在这里监听
-  // electron?.on('window-restored', () => syncIgnoreState())
+  electron?.on('center-navigation-bar', centerNavigationBar)
 })
 onUnmounted(() => disconnectService())
+
+const centerNavigationBar = () => {
+  const navRect = navRef.value?.getBoundingClientRect()
+  if (!navRect) return
+
+  electron?.send('center-navigation-bar', {
+    navCenterX: navRect.left + navRect.width / 2
+  })
+}
 
 const handleWindowResize = (contentSize: { width: number, height: number }) => {
   // 计算最终窗口尺寸
@@ -113,6 +123,7 @@ const handleWindowResize = (contentSize: { width: number, height: number }) => {
   <div class="overlay-container">
     
     <nav 
+      ref="navRef"
       class="global-controller" 
       @mouseenter="stopIgnore"
       @mouseleave="syncIgnoreState" 

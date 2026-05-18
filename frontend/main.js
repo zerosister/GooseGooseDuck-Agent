@@ -1,11 +1,47 @@
 // 使用 ESM 语法导入
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 // 在 ESM 中需要手动模拟 __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const CENTER_NAV_ARG = '--center-navigation';
+let mainWindow = null;
+
+const requestNavigationCenter = () => {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.webContents.send('center-navigation-bar');
+    }
+};
+
+const setupTaskbarTasks = () => {
+    if (process.platform !== 'win32') return;
+
+    const appPathArg = process.defaultApp ? `"${app.getAppPath()}" ` : '';
+    app.setUserTasks([
+        {
+            program: process.execPath,
+            arguments: `${appPathArg}${CENTER_NAV_ARG}`,
+            title: '导航栏居中',
+            description: '将悬浮导航栏移动到屏幕中间'
+        }
+    ]);
+};
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (_event, argv) => {
+        if (argv.includes(CENTER_NAV_ARG)) {
+            requestNavigationCenter();
+        }
+    });
+}
 
 function createWindow () {
     const win = new BrowserWindow({
@@ -24,6 +60,7 @@ function createWindow () {
         nodeIntegration: false,
         }
     });
+    mainWindow = win;
 
     // 加载 Vite 开发服务器地址
     win.loadURL('http://localhost:5173');
@@ -49,10 +86,40 @@ function createWindow () {
             win.setSize(width, height, true); 
         }
     });
+
+    ipcMain.on('center-navigation-bar', (event, { navCenterX }) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (!win) return;
+
+        const bounds = win.getBounds();
+        const display = screen.getDisplayMatching(bounds);
+        const workArea = display.workArea;
+        const targetNavCenterX = workArea.x + Math.round(workArea.width / 2);
+        const maxX = Math.max(workArea.x, workArea.x + workArea.width - bounds.width);
+        const nextX = Math.min(
+            Math.max(bounds.x + targetNavCenterX - Math.round(navCenterX), workArea.x),
+            maxX
+        );
+
+        win.setBounds({ x: nextX, y: bounds.y, width: bounds.width, height: bounds.height }, true);
+    });
+
+    win.on('closed', () => {
+        if (mainWindow === win) mainWindow = null;
+    });
 }
 
-app.whenReady().then(createWindow);
+if (gotSingleInstanceLock) {
+    app.whenReady().then(() => {
+        setupTaskbarTasks();
+        createWindow();
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+        if (process.argv.includes(CENTER_NAV_ARG)) {
+            requestNavigationCenter();
+        }
+    });
+
+    app.on('window-all-closed', () => {
+      if (process.platform !== 'darwin') app.quit();
+    });
+}
